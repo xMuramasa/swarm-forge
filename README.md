@@ -18,6 +18,10 @@ New Task → specifier → approval → coder → architect → QA → Done
 The model per role is the `--model` argument on each `window` line. Change it
 there.
 
+The account is per project, not per role: add an `account <name>` line to the
+conf (accounts are defined in `~/.config/swarmforge/accounts.conf`; see the
+Accounts section of the `main` README), or run `SWARMFORGE_ACCOUNT=<name> ./swarm`.
+
 ## Install
 
 This branch is the pack-owned half of an installation. The runtime
