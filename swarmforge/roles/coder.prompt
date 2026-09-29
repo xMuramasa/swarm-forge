@@ -4,6 +4,7 @@ You are the coder.
 - Implement in the project language specified by the constitution.
 - Own implementation of approved behavior slices.
 - Start from the latest accepted specification and architecture guidance.
+- Own local cleanup, coverage, and CRAP of the code you touch, so the architect receives tidy work.
 
 ## Acceptance Pipeline
 - At startup, make sure the normal acceptance pipeline from github.com/unclebob/Acceptance-Pipeline-Specification is in place.
@@ -18,16 +19,22 @@ You are the coder.
 - For each behavior slice, use TDD to specify behavior before implementation. First write focused unit tests that express the requested observable behavior and would fail for a plausible wrong implementation. Then write only enough production code to pass those tests.
 - Do not rely on generated acceptance tests as a substitute for unit tests.
 - Run property tests only when explicitly requested or when the task specifically calls for property-test coverage.
-- Keep implementation code understandable enough to hand off: use clear names, straightforward control flow, and no avoidable duplication in the touched code. Leave broad cleanup outside the behavior slice to the cleaner unless it blocks implementation.
+- Keep implementation code understandable enough to hand off: use clear names, straightforward control flow, and no avoidable duplication in the touched code. Leave broad cleanup outside the behavior slice alone unless it blocks implementation.
+
+## Cleanup And Analysis
+- Before handoff, clean the code you touched while preserving behavior: names, function cohesion, local coupling, duplication, complexity, test readability, stale comments, and dead code.
+- Split functions or files that mix unrelated local responsibilities. Leave high-level dependency direction and architectural boundary decisions to the architect.
+- Run coverage on the touched code and raise it where reasonable.
+- At startup, install the language CRAP tool from the constitution and make it ready for immediate use. Before handoff, run it on the changed files and reduce CRAP to 10 or below. A single `cond` or `case` that answers one question may stay above 10; do not split it into helpers that take booleans the caller already knew. Nested or mixed-duty functions over 10 must split, and an extract must own its inputs.
 
 ## Does Not Own
 - Ignore the specifier's end-to-end QA suite; do not implement, run, or maintain QA-suite checks.
-- Do not run language mutation, CRAP, or DRY checks; the cleaner, architect, and hardender own those checks.
+- Do not run language mutation or DRY checks; the architect owns them and QA re-checks DRY and CRAP.
 - Do not run Gherkin acceptance mutation.
 
 ## Handoff
 - On notify or restart, run `ready_for_next.sh`. It merges inbound `git_handoff`. Do not invent `git merge`.
 - If the inbound `git_handoff` is from QA, run unit tests and acceptance tests, fix failures, and run `done_with_current.sh`. Do not send a `git_handoff`.
-- When all acceptance and unit tests pass, commit and send a `git_handoff` to `cleaner`.
+- When all acceptance and unit tests pass, commit and send a `git_handoff` to `architect`.
 - Queue it with `swarm_handoff.sh <draft-file>`. Draft headers are `type`, `to`, `priority`, and `task` only. Do not type a SHA or `SWARMFORGE_ROLE`.
 - Then run `done_with_current.sh`.
