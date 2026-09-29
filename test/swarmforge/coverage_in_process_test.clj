@@ -5,6 +5,7 @@
             [commit-msg-hook]
             [handoff-lib]
             [handoffd]
+            [herdr]
             [merge-and-process]
             [pack-board]
             [pack-dashboard-request]
@@ -13,7 +14,6 @@
             [stop-handoff-daemon]
             [swarm-handoff]
             [swarm-tool]
-            [swarm-window-watchdog]
             [swarmforge]))
 
 (defn- tmp-dir []
@@ -23,20 +23,12 @@
   (is (= "By specifier." (commit-msg-hook/byline "specifier")))
   (is (= "hello\n\nBy coder.\n" (commit-msg-hook/append-byline "hello" "coder"))))
 
-(deftest watchdog-rewrites-window-state-in-process
-  (let [root (tmp-dir)
-        state-file (fs/path root "windows.tsv")
-        ids-file (fs/path root "window-ids")]
-    (try
-      (spit (str state-file)
-            (str "1\told-a\tswarmforge-coder\tSwarmForge Coder\n"
-                 "2\told-b\tswarmforge-cleaner\tSwarmForge Cleaner\n"))
-      (spit (str ids-file) "old-a\nold-b\n")
-      (swarm-window-watchdog/rewrite-window-id! state-file ids-file "2" "new-b")
-      (is (re-find #"2\tnew-b\tswarmforge-cleaner\tSwarmForge Cleaner" (slurp (str state-file))))
-      (is (= "old-a\nnew-b\n" (slurp (str ids-file))))
-      (finally
-        (fs/delete-tree root)))))
+(deftest herdr-agent-names-fit-herdr-rules
+  (is (= "sf-my-project-qa" (herdr/agent-name "/x/My Project" "QA")))
+  (let [name (herdr/agent-name "/x/a-very-long-project-directory-name" "specifier")]
+    (is (<= (count name) 32))
+    (is (re-matches #"[a-z][a-z0-9_-]{0,31}" name)))
+  (is (thrown? Exception (herdr/agent-name "/x/p" (apply str (repeat 40 "r"))))))
 
 (deftest handoff-lib-validates-priority-and-headers
   (is (handoff-lib/valid-priority? "10"))
@@ -255,11 +247,6 @@
     (is (= 404 (:status missing)))))
 
 (deftest swarmforge-launch-helpers
-  (is (= "iterm2" (swarmforge/normalize-terminal-backend "iTerm")))
-  (is (= "terminal-app" (swarmforge/normalize-terminal-backend "terminal")))
-  (is (= "windows-terminal" (swarmforge/normalize-terminal-backend "wt")))
-  (is (= "none" (swarmforge/normalize-terminal-backend "none")))
-  (is (= "ghostty" (swarmforge/normalize-terminal-backend "ghostty")))
   (is (= "--yolo " (swarmforge/yolo-flag "codex" {:extra-args ""})))
   (is (= "" (swarmforge/yolo-flag "codex" {:extra-args "--yolo"})))
   (is (= "--permission-mode bypassPermissions "

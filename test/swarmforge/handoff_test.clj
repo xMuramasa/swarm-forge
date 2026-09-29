@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is run-tests testing use-fixtures]]))
+            [clojure.test :refer [deftest is run-tests testing use-fixtures]]
+            [swarmforge.fake-herdr :as fake-herdr]))
 
 (def repo-root (fs/cwd))
 (def scripts-dir (fs/path repo-root "swarmforge" "scripts"))
@@ -29,6 +30,7 @@
   (let [result (apply sh/sh (concat args [:dir (str dir)
                                           :env (merge {"PATH" (System/getenv "PATH")
                                                        "GIT_CONFIG_NOSYSTEM" "1"}
+                                                      (fake-herdr/env dir)
                                                       env)]))]
     (when (and (not (false? ok?)) (not= 0 (:exit result)))
       (throw (ex-info (str "Command failed: " (str/join " " args))
@@ -560,22 +562,13 @@
   ;; When handoffd delivers the approved handoff to the receiver
   ;; Then the receiver and the now-unblocked sender are notified
   (let [root (tmp-dir)
-        bin (fs/path root "bin")
-        fake-tmux (fs/path bin "tmux")
-        tmux-log (fs/path root "tmux.log")
         receiver (fs/path root ".worktrees/receiver")]
     (init-repo! root)
     (setup-project! root)
-    (fs/create-dirs bin)
-    (write-file fake-tmux
-                (str "#!/usr/bin/env sh\n"
-                     "printf '%s\\n' \"$*\" >> \"$TMUX_LOG\"\n"
-                     "exit 0\n"))
-    (run {:dir root} "chmod" "+x" (str fake-tmux))
+    (fake-herdr/add-agents! root ["sender-session" "receiver-session"])
     (write-file (fs/path root ".swarmforge/roles.tsv")
                 (format "sender\tmaster\t%s\tsender-session\tSender\tcodex\ttask\nreceiver\treceiver\t%s\treceiver-session\tReceiver\tcodex\ttask\n"
                         root receiver))
-    (write-file (fs/path root ".swarmforge/tmux-socket") "/tmp/fake.sock\n")
     (write-file (fs/path root ".swarmforge/handoffs/outbox/50_approved.handoff")
                 "from: sender\nto: receiver\npriority: 50\ntype: git_handoff\ntask_id: task-one\ntask: task-one\ncommit: 1234567890\napproved: true\n\npayload\n")
     (put-handoff! root "new" "50_next.handoff"
@@ -588,16 +581,14 @@
                    :task-id "task-two"
                    :task "task-two"
                    :body "next task"})
-    (let [result (run {:dir root
-                       :env {"PATH" (str bin ":" (System/getenv "PATH"))
-                             "TMUX_LOG" (str tmux-log)}}
+    (let [result (run {:dir root}
                       "bb" (script "handoffd.bb") "--once" (str root))
-          log-text (read-file tmux-log)]
+          woken (set (map first (fake-herdr/prompts root)))]
       (is (zero? (:exit result)))
       (is (fs/exists? (fs/path receiver ".swarmforge/handoffs/inbox/new/50_approved.handoff")))
       (is (fs/exists? (fs/path root ".swarmforge/handoffs/inbox/new/50_next.handoff")))
-      (is (str/includes? log-text "-t receiver-session"))
-      (is (str/includes? log-text "-t sender-session"))
+      (is (contains? woken "receiver-session"))
+      (is (contains? woken "sender-session"))
       (is (str/includes? (read-file (fs/path root ".swarmforge/daemon/handoffd.log"))
                          "notified-unblocked-sender sender")))))
 
@@ -1011,7 +1002,6 @@
     (fs/create-dirs (fs/path root ".swarmforge/daemon"))
     (write-file (fs/path root ".swarmforge/roles.tsv")
                 (str "coder\tmaster\t" root "\tsession\tCoder\tcodex\ttask\n"))
-    (write-file (fs/path root ".swarmforge/tmux-socket") "/tmp/fake.sock\n")
     (run {:dir root :ok? false}
          "sh" "-c"
          (str "bb " (script "handoffd.bb") " " root " >/dev/null 2>&1 &"))

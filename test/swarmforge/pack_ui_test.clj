@@ -4,7 +4,8 @@
             [clojure.edn :as edn]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is run-tests use-fixtures]]))
+            [clojure.test :refer [deftest is run-tests use-fixtures]]
+            [swarmforge.fake-herdr :as fake-herdr]))
 
 (def six-pack-roles ["specifier" "coder" "cleaner" "architect" "hardender" "QA"])
 
@@ -33,6 +34,7 @@
   (let [result (apply sh/sh (concat args [:dir (str dir)
                                           :env (merge {"PATH" (System/getenv "PATH")
                                                        "GIT_CONFIG_NOSYSTEM" "1"}
+                                                      (fake-herdr/env dir)
                                                       env)]))]
     (when (and (not (false? ok?)) (not= 0 (:exit result)))
       (throw (ex-info (str "Command failed: " (str/join " " args))
@@ -192,15 +194,12 @@
 (defn task-card [root name]
   (some #(when (= name (:name %)) %) (:tasks (web-state root))))
 
-(defn start-tmux! [root sessions]
-  (let [sock (str (fs/path root "tmux.sock"))]
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
-    (doseq [session sessions]
-      (run {:dir root} "tmux" "-S" sock "new-session" "-d" "-s" session "sleep" "120"))
-    sock))
+(defn start-herdr! [root sessions]
+  (fake-herdr/add-agents! root sessions)
+  root)
 
-(defn stop-tmux! [sock]
-  (run {:dir "." :ok? false} "tmux" "-S" sock "kill-server"))
+(defn stop-herdr! [root]
+  (fs/delete-tree (fake-herdr/state-dir root)))
 
 (defn handoffd-once
   ([root] (handoffd-once root nil))
@@ -308,13 +307,13 @@
                  (create-task root "htw-console-app" "coder")
                  (increment-audit! root (:id (task-card root "htw-console-app")))
                  (queue-handoff! root {:from "coder" :to "cleaner" :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "cleaner" (task-lane root "htw-console-app")))
       (is (= 1 (:audit_count (task-card root "htw-console-app"))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-marks-the-task-card-done-for-terminal-handoff
   ;; Given six-pack, card in QA (not master)
@@ -325,12 +324,12 @@
         sock (do (setup-pack! root six-pack-roles)
                  (create-task root "htw-console-app" "QA")
                  (queue-handoff! root {:from "QA" :to to :task "htw-console-app"})
-                 (start-tmux! root six-pack-roles))]
+                 (start-herdr! root six-pack-roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "htw-console-app")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (def four-pack-roles ["specifier" "coder" "refactorer" "architect"])
 (def reverse-structure-body
@@ -356,7 +355,7 @@
                  (queue-handoff! root {:from "refactorer" :to "coder" :task "HTW"
                                        :priority "00" :non-forwarding true
                                        :body reverse-structure-body})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (let [coder-mail (sort (inbox-names root roles "coder"))
@@ -373,7 +372,7 @@
       (is (= "architect" (task-lane root "HTW")))
       (is (not= "done" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-four-pack-architect-back-all-dones-because-last
   (let [root (tmp-dir)
@@ -386,14 +385,14 @@
                    (queue-handoff! root {:from "architect" :to role :task "HTW"
                                          :priority "00" :non-forwarding true
                                          :body reverse-structure-body}))
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (doseq [role ["specifier" "coder" "refactorer"]]
         (is (seq (inbox-names root roles role)) role))
       (is (= "done" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-six-pack-architect-back-all-moves-to-hardender
   (let [root (tmp-dir)
@@ -407,7 +406,7 @@
                  (doseq [role ["specifier" "coder" "cleaner"]]
                    (queue-handoff! root {:from "architect" :to role :task "HTW"
                                          :priority "00" :non-forwarding true}))
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (doseq [role ["specifier" "coder" "cleaner"]]
@@ -417,7 +416,7 @@
       (is (= "hardender" (task-lane root "HTW")))
       (is (not= "done" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-six-pack-qa-back-all-dones-because-last
   (let [root (tmp-dir)
@@ -431,14 +430,14 @@
                  (doseq [role ["specifier" "coder" "cleaner" "architect" "hardender"]]
                    (queue-handoff! root {:from "QA" :to role :task "HTW"
                                          :priority "00" :non-forwarding true}))
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (doseq [role ["specifier" "coder" "cleaner" "architect" "hardender"]]
         (is (seq (inbox-names root roles role)) role))
       (is (= "done" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-two-pack-cleaner-back-one-dones-because-last
   (let [root (tmp-dir)
@@ -449,13 +448,13 @@
                                        :priority "50" :non-forwarding true})
                  (queue-handoff! root {:from "cleaner" :to "coder" :task "HTW"
                                        :priority "00" :non-forwarding true})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (seq (inbox-names root roles "coder")))
       (is (= "done" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-web-exposes-dashboard-state-from-conf-and-board
   ;; Given a six-pack with specifier as master and a board card
@@ -509,7 +508,7 @@
         roles six-pack-roles
         sock (do (setup-pack! root roles)
                  (pack-web root true "--test-post-task" (str root) "HTW" "Print hello")
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "specifier" (task-lane root "HTW")))
@@ -519,7 +518,7 @@
       (is (empty? (handoff-names (fs/path (pack-worktree root roles "coder")
                                          ".swarmforge/handoffs/sent"))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest specifier-git-handoff-waits-for-attention
   ;; Given six-pack-shaped roles + card in specifier
@@ -532,7 +531,7 @@
                  (increment-audit! root (:id (task-card root "htw-console-app")))
                  (queue-handoff! root {:from "specifier" :to "coder" :task "htw-console-app"
                                        :artifacts artifacts})
-                 (start-tmux! root six-pack-roles))]
+                 (start-herdr! root six-pack-roles))]
     (try
       (handoffd-once root)
       (let [state (web-state root)]
@@ -548,7 +547,7 @@
                  :reviews {}}]
                (:approvals state))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest two-pack-git-handoff-does-not-wait
   ;; Given coder master, cleaner next, no specifier
@@ -559,7 +558,7 @@
         sock (do (setup-pack! root roles)
                  (create-task root "htw-console-app" "coder")
                  (queue-handoff! root {:from "coder" :to "cleaner" :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (seq (inbox-names root roles "cleaner")))
@@ -567,7 +566,7 @@
       (is (= "cleaner" (task-lane root "htw-console-app")))
       (is (= [] (:approvals (web-state root))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest two-pack-end-broadcast-marks-the-card-done
   ;; Given two-pack, card in cleaner
@@ -578,14 +577,14 @@
         sock (do (setup-pack! root roles)
                  (create-task root "htw-console-app" "cleaner")
                  (queue-handoff! root {:from "cleaner" :to "coder" :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "htw-console-app")))
       (is (seq (inbox-names root roles "coder")))
       (is (= [] (pending-names root)))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest four-pack-end-broadcast-marks-the-card-done
   ;; Given four-pack, card in architect
@@ -598,7 +597,7 @@
                  (queue-handoff! root {:from "architect"
                                        :to "specifier,coder,refactorer"
                                        :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "htw-console-app")))
@@ -607,7 +606,7 @@
       (is (seq (inbox-names root roles "refactorer")))
       (is (= [] (pending-names root)))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest four-pack-last-role-git-handoff-is-done
   ;; Given four-pack, card in architect
@@ -620,12 +619,12 @@
                  (queue-handoff! root {:from "architect"
                                        :to "specifier,coder"
                                        :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "htw-console-app")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest four-pack-one-recipient-non-forwarding-is-done
   ;; Given four-pack, card in architect
@@ -639,13 +638,13 @@
                                        :to "specifier"
                                        :task "HTW"
                                        :non-forwarding true})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "HTW")))
       (is (seq (inbox-names root roles "specifier")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest terminal-handoff-dones-finished-batch-cards-in-sender-lane
   ;; Given two-pack, Command syntax and validation in cleaner, those names in a
@@ -666,14 +665,14 @@
                  (write-file (fs/path batch "50_validation.handoff")
                              "from: coder\nto: cleaner\npriority: 50\ntype: git_handoff\ntask: validation\n\npayload\n")
                  (queue-handoff! root {:from "cleaner" :to "coder" :task "HTW"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "HTW")))
       (is (= "done" (task-lane root "Command syntax")))
       (is (= "done" (task-lane root "validation")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest terminal-handoff-leaves-unfinished-lane-cards
   ;; Given two-pack, HTW finished in a completed batch, Command syntax only in the lane
@@ -689,13 +688,13 @@
                  (write-file (fs/path done "50_htw.handoff")
                              "from: coder\nto: cleaner\npriority: 50\ntype: git_handoff\ntask: HTW\n\npayload\n")
                  (queue-handoff! root {:from "cleaner" :to "coder" :task "HTW"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "HTW")))
       (is (= "cleaner" (task-lane root "Command syntax")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest terminal-handoff-dones-in-process-batch-cards
   ;; Given two-pack, one liners/validate/HHG in an in-process cleaner batch,
@@ -718,7 +717,7 @@
                  (write-file (fs/path batch "50_hhg.handoff")
                              "from: coder\nto: cleaner\npriority: 50\ntype: git_handoff\ntask: Holy Hand Grenade\n\npayload\n")
                  (queue-handoff! root {:from "cleaner" :to "coder" :task "one liners"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "one liners")))
@@ -726,7 +725,7 @@
       (is (= "done" (task-lane root "Holy Hand Grenade")))
       (is (= "cleaner" (task-lane root "Command syntax")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest six-pack-qa-broadcast-marks-the-card-done
   ;; Given six-pack, card in QA
@@ -737,7 +736,7 @@
         sock (do (setup-pack! root six-pack-roles)
                  (create-task root "htw-console-app" "QA")
                  (queue-handoff! root {:from "QA" :to others :task "htw-console-app"})
-                 (start-tmux! root six-pack-roles))]
+                 (start-herdr! root six-pack-roles))]
     (try
       (handoffd-once root)
       (is (= "done" (task-lane root "htw-console-app")))
@@ -745,7 +744,7 @@
       (is (seq (inbox-names root six-pack-roles "hardender")))
       (is (= [] (pending-names root)))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest attention-approve-delivers-the-handoff
   ;; Given pending approval
@@ -757,7 +756,7 @@
                  (increment-audit! root (:id (task-card root "htw-console-app")))
                  (queue-handoff! root {:from "specifier" :to "coder" :task "htw-console-app"
                                        :artifacts "features/console.feature"})
-                 (start-tmux! root six-pack-roles))]
+                 (start-herdr! root six-pack-roles))]
     (try
       (handoffd-once root)
       (let [id (:id (first (:approvals (web-state root))))]
@@ -769,7 +768,7 @@
         (is (= [] (pending-names root)))
         (is (= [] (:approvals (web-state root)))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest attention-reject-returns-to-master
   ;; Given pending
@@ -780,7 +779,7 @@
                  (create-task root "htw-console-app" "specifier")
                  (increment-audit! root (:id (task-card root "htw-console-app")))
                  (queue-handoff! root {:from "specifier" :to "coder" :task "htw-console-app"})
-                 (start-tmux! root six-pack-roles))]
+                 (start-herdr! root six-pack-roles))]
     (try
       (handoffd-once root)
       (let [id (:id (first (:approvals (web-state root))))
@@ -792,7 +791,7 @@
         (is (seq (:approvals (web-state root))))
         (is (not (fs/exists? (fs/path root ".swarmforge/notify/reject-htw-console-app")))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest attention-reject-preserves-branch-and-rolls-back-head
   ;; Given a pending approval with task identity and a task base commit
@@ -853,8 +852,8 @@
     (is (zero? (:exit result)))
     (is (= (str example-task-payload "\n") (:out result)))))
 
-(deftest pack-web-post-task-creates-a-card-when-tmux-is-missing
-  ;; Given no tmux socket or live session
+(deftest pack-web-post-task-creates-a-card-when-herdr-is-missing
+  ;; Given no live agent
   ;; When POST /api/tasks via --test-post-task
   ;; Then inject failure is ignored and the card is still created
   (let [root (tmp-dir)
@@ -876,39 +875,30 @@
       (is (str/includes? (str (:err result)) "inject failed"))
       (is (str/includes? (str (:err result)) "coder")))))
 
-(deftest inject-master-records-send-keys-argv
-  ;; Given master session swarmforge-specifier in roles.tsv
-  ;; When --test-inject-argv records the would-be tmux argv
-  ;; Then it send-keys -l the text to that session, then C-m
+(deftest inject-master-records-agent-prompt-argv
+  ;; Given master agent sf-specifier in roles.tsv
+  ;; When --test-inject-argv records the would-be herdr argv
+  ;; Then it prompts that agent with the text
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))
+        argv-file (str (fs/path root "herdr.argv"))
         text "hello from operator"]
     (write-file
      (fs/path root ".swarmforge/roles.tsv")
-     (str "specifier\tmaster\t" root "\tswarmforge-specifier\tSpecifier\tcodex\ttask\n"))
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
-    (let [result (pack-web root false "--test-inject-argv" (str root) argv-file text)
-          argv (read-argv argv-file)]
+     (str "specifier\tmaster\t" root "\tsf-specifier\tSpecifier\tcodex\ttask\n"))
+    (let [result (pack-web root false "--test-inject-argv" (str root) argv-file text)]
       (is (zero? (:exit result)))
-      (is (= ["tmux" "-S" sock "send-keys" "-t" "swarmforge-specifier:Specifier.0" "-l" text]
-             (first argv)))
-      (is (= ["tmux" "-S" sock "send-keys" "-t" "swarmforge-specifier:Specifier.0" "C-m"]
-             (second argv)))
-      (is (= ["tmux" "-S" sock "send-keys" "-t" "swarmforge-specifier:Specifier.0" "C-j"]
-             (nth argv 2))))))
+      (is (= [["herdr" "agent" "prompt" "sf-specifier" text]]
+             (read-argv argv-file))))))
 
 (deftest pack-web-post-task-queues-a-note-for-master
-  ;; Given a specifier pack and a tmux argv stub
+  ;; Given a specifier pack and a herdr argv stub
   ;; When POST /api/tasks records name and text
   ;; Then the card is in specifier, a (New Task) note is in the outbox, and the pane is not injected
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))
+        argv-file (str (fs/path root "herdr.argv"))
         text example-task-text]
     (setup-pack! root)
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
-    (let [result (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+    (let [result (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                                "--test-post-task" (str root) "htw-console-app" text)
           queued (handoff-names (fs/path root ".swarmforge/handoffs/outbox"))
           content (when (seq queued)
@@ -924,36 +914,31 @@
       (is (empty? (read-argv argv-file))))))
 
 (deftest pack-web-post-chat-injects-text-as-is
-  ;; Given a tmux argv stub
+  ;; Given a herdr argv stub
   ;; When POST /api/chat {text}
-  ;; Then inject-master! send-keys that text, not a Task payload
+  ;; Then inject-master! prompts the agent with that text, not a Task payload
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))
+        argv-file (str (fs/path root "herdr.argv"))
         text "Please add a --help flag"]
     (setup-pack! root)
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
-    (let [result (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+    (let [result (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                                "--test-post-chat" (str root) text)
           argv (read-argv argv-file)]
       (is (zero? (:exit result)))
       (is (str/includes? (str (last (first argv))) text))
       (is (re-find #"\[req-" (str (last (first argv)))))
       (is (not (str/starts-with? (str (last (first argv))) "Task:")))
-      (is (= "C-m" (last (second argv))))
-      (is (= "C-j" (last (nth argv 2)))))))
+      (is (= 1 (count argv))))))
 
 (deftest attention-reject-injects-a-message-to-master
-  ;; Given a pending approval and a tmux argv stub
+  ;; Given a pending approval and a herdr argv stub
   ;; When retry with comments
   ;; Then master receives those comments and no New Task note is queued
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))]
+        argv-file (str (fs/path root "herdr.argv"))]
     (setup-pack! root six-pack-roles)
     (create-task root "htw-console-app" "specifier")
     (let [task-id (:id (task-card root "htw-console-app"))]
-      (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
       (write-file
        (fs/path root ".swarmforge/handoffs/pending_approval/50_from_specifier_to_coder.handoff")
        (str "from: specifier\n"
@@ -964,7 +949,7 @@
             "task: htw-console-app\n"
             "\n"
             "payload\n"))
-      (let [result (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+      (let [result (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                                  "--test-retry-task" (str root)
                                  "50_from_specifier_to_coder"
                                  "use an RNG")
@@ -975,8 +960,7 @@
         (is (not (fs/exists? (fs/path root ".swarmforge/notify/reject-htw-console-app"))))
         (is (str/includes? (str (last (first argv))) "use an RNG"))
         (is (empty? (filter #(str/includes? (fs/file-name %) "New_Task") notes)))
-        (is (= "C-m" (last (second argv))))
-        (is (= "C-j" (last (nth argv 2))))))))
+        (is (= 1 (count argv)))))))
 
 (deftest pack-web-lists-every-role-in-the-work-queue
   ;; Given a six-pack with no in_process mail
@@ -1005,14 +989,14 @@
       (is (re-matches #"\d{4}-\d{2}-\d{2}T.*Z" (or (:updated_at row) ""))))))
 
 (deftest pack-web-marks-in-process-roles-live-when-session-exists
-  ;; Given coder in_process and live tmux sessions
+  ;; Given coder in_process and live agents
   ;; When pack_web --test-state
   ;; Then coder is live with that task and specifier is idle
   (let [root (tmp-dir)
         roles ["specifier" "coder"]
         sock (do (setup-pack! root roles)
                  (put-in-process! root roles "coder" {:from "specifier" :task "cave-walk"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (let [wif (:work_in_flight (web-state root))
             by-role (into {} (map (juxt :role identity) wif))]
@@ -1021,7 +1005,7 @@
         (is (= "cave-walk" (:task (get by-role "coder"))))
         (is (= "" (:task (get by-role "specifier")))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-web-lists-batch-in-process-in-work-in-flight
   ;; Given a batch dir in coder in_process for task cave-walk
@@ -1094,7 +1078,7 @@
         sock (do (setup-pack! root roles)
                  (create-task root "htw-console-app" "coder")
                  (queue-handoff! root {:from "coder" :to "cleaner" :task "htw-console-app"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root {"SWARMFORGE_PANE_STUB" "pane\n"})
       (let [pane (role-pane-path root "coder")]
@@ -1102,7 +1086,7 @@
         (is (= "pane\n" (slurp (str pane))))
         (is (not (fs/exists? (pane-path root "coder" "htw-console-app")))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-board-archives-live-role-panes
   ;; Given a two-pack with a live card in coder and a done card
@@ -1129,12 +1113,8 @@
         roles ["coder" "cleaner"]]
     (setup-pack! root roles)
     (create-task root "htw-console-app" "coder")
-    (write-file (fs/path root ".swarmforge/tmux-socket")
-                (str (fs/path root "tmux.sock") "\n"))
-    (write-file (fs/path root ".swarmforge/window-ids") "")
     (let [result (run {:dir root
-                       :env {"SWARMFORGE_TERMINAL_BACKEND" "none"
-                             "SWARMFORGE_PANE_STUB" "pane\n"}}
+                       :env {"SWARMFORGE_PANE_STUB" "pane\n"}}
                       (str (fs/path repo-root "close-swarm"))
                       (str root))]
       (is (zero? (:exit result)))
@@ -1222,12 +1202,12 @@
     (is (str/includes? (str (:err result) (:out result)) "TEARDOWN"))))
 
 (deftest pack-web-teardown-kills-sessions-and-handoffd
-  ;; Given a live tmux session and a fake handoffd pid
+  ;; Given a live workspace and a fake handoffd pid
   ;; When teardown is confirmed
-  ;; Then the tmux server is dead and the daemon pid is gone
+  ;; Then the workspace is closed and the daemon pid is gone
   (let [root (tmp-dir)
         _ (setup-pack! root ["coder" "cleaner"])
-        sock (start-tmux! root ["coder" "cleaner"])
+        sock (start-herdr! root ["coder" "cleaner"])
         daemon (.start (java.lang.ProcessBuilder. ["sleep" "120"]))
         pid (str (.pid daemon))
         pack-web-proc (.start (java.lang.ProcessBuilder. ["sleep" "120"]))
@@ -1235,10 +1215,11 @@
     (try
       (write-file (fs/path root ".swarmforge/daemon/handoffd.pid") (str pid "\n"))
       (write-file (fs/path root ".swarmforge/pack_web.pid") (str pack-web-pid "\n"))
+      (write-file (fs/path root ".swarmforge/herdr-workspace") "w9\n")
       (let [result (pack-web root false "--test-teardown" (str root) "TEARDOWN")]
         (is (zero? (:exit result)))
         (is (str/includes? (:out result) "teardown_started"))
-        (is (not= 0 (:exit (run {:dir root :ok? false} "tmux" "-S" sock "list-sessions"))))
+        (is (= ["w9"] (fake-herdr/closed root)))
         (is (false? (.isAlive daemon)))
         (is (false? (.isAlive pack-web-proc)))
         (is (not (fs/exists? (fs/path root ".swarmforge/daemon/handoffd.pid"))))
@@ -1248,7 +1229,7 @@
           (.destroyForcibly daemon))
         (when (.isAlive pack-web-proc)
           (.destroyForcibly pack-web-proc))
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-board-move-matches-task-name-ignoring-case
   ;; Given board card HTW
@@ -1269,12 +1250,12 @@
         sock (do (setup-pack! root roles)
                  (create-task root "HTW" "coder")
                  (queue-handoff! root {:from "coder" :to "cleaner" :task "htw"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "cleaner" (task-lane root "HTW")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest handoffd-does-not-deliver-when-board-task-is-unknown
   ;; Given card HTW and a handoff for other-task
@@ -1285,13 +1266,13 @@
         sock (do (setup-pack! root roles)
                  (create-task root "HTW" "coder")
                  (queue-handoff! root {:from "coder" :to "cleaner" :task "other-task"})
-                 (start-tmux! root roles))]
+                 (start-herdr! root roles))]
     (try
       (handoffd-once root)
       (is (= "coder" (task-lane root "HTW")))
       (is (= [] (inbox-names root roles "cleaner")))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-web-shows-board-card-as-live-work
   ;; Given card HTW in specifier and a live specifier session
@@ -1300,27 +1281,25 @@
   (let [root (tmp-dir)
         sock (do (setup-pack! root)
                  (create-task root "HTW" "specifier")
-                 (start-tmux! root ["specifier"]))]
+                 (start-herdr! root ["specifier"]))]
     (try
       (let [row (some #(when (= "specifier" (:role %)) %)
                       (:work_in_flight (web-state root)))]
         (is (= "HTW" (:task row)))
         (is (= "live" (:state row))))
       (finally
-        (stop-tmux! sock)))))
+        (stop-herdr! sock)))))
 
 (deftest pack-web-chat-persists-and-answers
   ;; Given a pack root
   ;; When POST /api/chat then pack_dashboard_request answer
   ;; Then /api/state chat has the body and response
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))
+        argv-file (str (fs/path root "herdr.argv"))
         answer (fs/path root "tmp" "answer.txt")]
     (setup-pack! root)
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
     (write-file answer "the spec is ready\nwith two documents\n")
-    (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+    (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                   "--test-post-chat" (str root) "status?")
     (let [listed (run {:dir root}
                       (script "pack_dashboard_request.sh")
@@ -2076,16 +2055,14 @@
 
 (deftest pack-web-retry-delivers-remedial-comments-to-master
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
-        sock (str (fs/path root "tmux.sock"))]
+        argv-file (str (fs/path root "herdr.argv"))]
     (setup-pack! root)
     (create-task root "HTW" "specifier")
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
     (let [task-id (:id (task-card root "HTW"))]
       (write-pending-approval! root {:id "50_hello" :task "HTW" :task-id task-id})
       (pack-web root false "--test-save-comments" (str root)
                 "50_hello" "features/console.feature" "use an RNG")
-      (let [result (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+      (let [result (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                                  "--test-retry-task" (str root) "50_hello" "")
             argv (read-argv argv-file)
             injected (str (last (first argv)))]
@@ -2139,10 +2116,9 @@
   ;; When the operator answers
   ;; Then /api/state listed it and the answer is injected into QA with the durable id
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
+        argv-file (str (fs/path root "herdr.argv"))
         question (fs/path root "tmp" "question.txt")]
     (setup-pack! root ["QA"])
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str (fs/path root "tmux.sock") "\n"))
     (write-file question "Does the bat drop to any of 20 rooms?\n")
     (let [created (run {:dir root :env {"SWARMFORGE_ROLE" "QA"}}
                        (script "pack_dashboard_request.sh")
@@ -2155,7 +2131,7 @@
       (is (= "QA" (:role item)))
       (is (str/includes? (:body item) "Does the bat drop to any of 20 rooms?"))
       (is (= "pending" (:status item)))
-      (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+      (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                     "--test-answer-clarification" (str root) id "Yes, 1 to 20.\nUse all rooms.")
       (let [argv (slurp argv-file)
             done (first (:clarifications (web-state root)))
@@ -2170,18 +2146,17 @@
 
 (deftest pack-dashboard-request-accepts-an-already-answered-clarification
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
+        argv-file (str (fs/path root "herdr.argv"))
         question (fs/path root "tmp" "question.txt")
         ack (fs/path root "tmp" "answer.txt")]
     (setup-pack! root ["QA"])
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str (fs/path root "tmux.sock") "\n"))
     (write-file question "Does the bat drop to any of 20 rooms?\n")
     (write-file ack "ignored local ack\n")
     (let [created (run {:dir root :env {"SWARMFORGE_ROLE" "QA"}}
                        (script "pack_dashboard_request.sh")
                        "clarify" (str question))
           id (str/trim (:out created))]
-      (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+      (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                     "--test-answer-clarification" (str root) id "Yes, 1 to 20.")
       (let [acked (run {:dir root :env {"SWARMFORGE_ROLE" "QA"}}
                        (script "pack_dashboard_request.sh")
@@ -2335,15 +2310,14 @@
   ;; When the operator answers
   ;; Then the injected pane text includes the question and Clarification requested from
   (let [root (tmp-dir)
-        argv-file (str (fs/path root "tmux.argv"))
+        argv-file (str (fs/path root "herdr.argv"))
         question (fs/path root "tmp" "question.txt")]
     (setup-pack! root ["QA"])
-    (write-file (fs/path root ".swarmforge/tmux-socket") (str (fs/path root "tmux.sock") "\n"))
     (write-file question "Does the bat drop to any of 20 rooms?\n")
     (let [id (str/trim (:out (run {:dir root :env {"SWARMFORGE_ROLE" "QA"}}
                                   (script "pack_dashboard_request.sh")
                                   "clarify" (str question))))]
-      (pack-web-env root {"SWARMFORGE_TMUX_STUB" argv-file}
+      (pack-web-env root {"SWARMFORGE_HERDR_STUB" argv-file}
                     "--test-answer-clarification" (str root) id "Yes, 1 to 20.")
       (let [argv (slurp argv-file)]
         (is (str/includes? argv "Clarification requested from: QA"))

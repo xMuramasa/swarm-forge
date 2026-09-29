@@ -31,6 +31,7 @@
   (require 'handoff-lib)
   (catch Exception _
     (load-file (str (fs/path script-dir "handoff_lib.bb")))))
+(load-file (str (fs/path script-dir "herdr.bb")))
 
 (defn usage []
   (binding [*out* *err*]
@@ -238,29 +239,17 @@
       (exit! 1 "Config must name exactly one master worktree"))
     (println (ffirst masters))))
 
-(defn tmux-socket [root]
-  (let [file (fs/path root ".swarmforge" "tmux-socket")]
-    (when (fs/exists? file)
-      (not-empty (str/trim (slurp (str file)))))))
-
 (defn session-for-role [root role]
   (when-let [row (some #(when (= role (first %)) %) (role-rows root))]
     (let [session (nth row 3 nil)]
       (if (str/blank? session)
-        (str "swarmforge-" role)
+        (str "sf-" (herdr/clean role))
         session))))
-
-(defn tmux-pane [root role]
-  (let [socket (tmux-socket root)
-        session (session-for-role root role)]
-    (when (and socket session)
-      (let [result (sh "tmux" "-S" socket "capture-pane" "-p" "-t" session "-S" "-")]
-        (when (zero? (:exit result))
-          (:out result))))))
 
 (defn pane-text [root role]
   (or (System/getenv "SWARMFORGE_PANE_STUB")
-      (tmux-pane root role)))
+      (when-let [session (session-for-role root role)]
+        (herdr/read-text session))))
 
 (defn archive-session! [root role]
   (when-not (str/blank? role)

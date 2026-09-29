@@ -5,9 +5,8 @@
             [babashka.process :as process]
             [clojure.string :as str]))
 
-(def session-prefix "swarmforge")
-(def agent-window "swarm")
-(def pane-history-limit 10000)
+(load-file (str (fs/path (fs/parent *file*) "herdr.bb")))
+
 (def red "\u001b[0;31m")
 (def green "\u001b[0;32m")
 (def yellow "\u001b[1;33m")
@@ -27,13 +26,6 @@
 (defn command-exists? [command]
   (sh-ok? "sh" "-c" (str "command -v " command " >/dev/null 2>&1")))
 
-(defn env-long [name default-value]
-  (if-let [value (System/getenv name)]
-    (if (re-matches #"[0-9]+" value)
-      (Long/parseLong value)
-      default-value)
-    default-value))
-
 (defn fail! [message]
   (binding [*out* *err*]
     (println message))
@@ -42,60 +34,14 @@
 (defn sq [value]
   (str "'" (str/replace (str value) #"'" "'\"'\"'") "'"))
 
-(defn normalize-terminal-backend [backend]
-  (case (str/lower-case backend)
-    ("iterm" "iterm2" "iterm.app") "iterm2"
-    ("terminal" "terminal-app" "terminal.app") "terminal-app"
-    ("windows" "windows-terminal" "wt") "windows-terminal"
-    ("none" "current" "fallback") "none"
-    (str/lower-case backend)))
-
-(defn detect-terminal-backend []
-  (if-let [backend (System/getenv "SWARMFORGE_TERMINAL")]
-    (normalize-terminal-backend backend)
-    (cond
-      (command-exists? "osascript") (if (= (System/getenv "TERM_PROGRAM") "iTerm.app")
-                                      "iterm2"
-                                      "terminal-app")
-      (command-exists? "wt.exe") "windows-terminal"
-      :else "none")))
-
 (defn display-name-for-role [role]
   (->> (str/split (str/replace role #"[-_]" " ") #"\s+")
        (remove str/blank?)
        (map str/capitalize)
        (str/join " ")))
 
-(defn session-name-for-role [role]
-  (str session-prefix "-" role))
-
 (defn worktree-path-for-name [worktrees-dir worktree]
   (fs/path worktrees-dir worktree))
-
-(defn tmux-agent-target [window pane-base-index session]
-  (str session ":" window "." pane-base-index))
-
-(defn tmux-option [tmux-socket option scope default-value]
-  (let [args (case scope
-               :session ["tmux" "-S" tmux-socket "show-options" "-gqv" option]
-               :window ["tmux" "-S" tmux-socket "show-options" "-gwqv" option])
-        result (apply process/sh (concat [{:continue true}] args))
-        value (str/trim (:out result))]
-    (if (re-matches #"[0-9]+" value)
-      (Long/parseLong value)
-      default-value)))
-
-(defn detect-tmux-base-indexes [ctx]
-  (fs/create-dirs (:tmux-socket-dir ctx))
-  (let [probe-session (when-not (sh-ok? "tmux" "-S" (:tmux-socket ctx) "info")
-                        (let [session (str "swarmforge-probe-" (.pid (java.lang.ProcessHandle/current)))]
-                          (sh "tmux" "-S" (:tmux-socket ctx) "new-session" "-d" "-s" session "sleep 60")
-                          session))
-        window-base (tmux-option (:tmux-socket ctx) "base-index" :session 0)
-        pane-base (tmux-option (:tmux-socket ctx) "pane-base-index" :window 0)]
-    (when probe-session
-      (process/sh {:continue true} "tmux" "-S" (:tmux-socket ctx) "kill-session" "-t" probe-session))
-    (assoc ctx :tmux-window-base-index window-base :tmux-pane-base-index pane-base)))
 
 (defn ensure-in-file! [file pattern]
   (fs/create-dirs (fs/parent file))
@@ -183,7 +129,7 @@
 (defn window-row [ctx role agent worktree receive-mode propagation extra-args visible?]
   {:role role
    :agent agent
-   :session (session-name-for-role role)
+   :session (herdr/agent-name (:working-dir ctx) role)
    :display-name (display-name-for-role role)
    :worktree-name worktree
    :worktree-path (if (special-worktree? worktree)
@@ -272,24 +218,16 @@
    "ready_for_next_batch.sh" "ready_for_next_batch.bb"
    "done_with_current_batch.sh" "done_with_current_batch.bb"
    "handoffd.bb" "stop_handoff_daemon.bb" "stop_handoff_daemon.sh"
-   "swarm-cleanup.sh" "swarm-window-watchdog.sh" "swarm_window_watchdog.bb"
-   "swarm-terminal-adapter.sh" "swarmforge.sh" "swarmforge.bb"
+   "swarmforge.sh" "swarmforge.bb"
    "pack_board.sh" "pack_board.bb"
    "pack_web.sh" "pack_web.bb"
    "pack_dashboard_request.sh" "pack_dashboard_request.bb"])
-
-(def terminal-helpers
-  ["terminal-app.sh" "iterm2.sh" "ghostty.sh" "windows-terminal.sh" "none.sh"])
 
 (defn check-helper-scripts! [ctx]
   (doseq [helper required-helpers]
     (let [path (fs/path (:script-dir ctx) helper)]
       (when-not (and (fs/exists? path) (fs/executable? path))
-        (fail! (str red "Error:" reset " Required helper script not found or not executable: " path)))))
-  (doseq [helper terminal-helpers]
-    (let [path (fs/path (:script-dir ctx) "terminal-adapters" helper)]
-      (when-not (and (fs/exists? path) (fs/executable? path))
-        (fail! (str red "Error:" reset " Required terminal adapter not found or not executable: " path))))))
+        (fail! (str red "Error:" reset " Required helper script not found or not executable: " path))))))
 
 (defn git-hooks-dir [ctx]
   (let [path (sh-out "git" "-C" (str (:working-dir ctx)) "rev-parse" "--git-path" "hooks")
@@ -311,9 +249,8 @@
 
 (defn prepare-workspace! [ctx]
   (doseq [dir [(:state-dir ctx) (:notify-dir ctx) (:prompts-dir ctx)
-               (:worktrees-dir ctx) (:tmux-socket-dir ctx) (:daemon-dir ctx)]]
+               (:worktrees-dir ctx) (:daemon-dir ctx)]]
     (fs/create-dirs dir))
-  (spit (str (:tmux-socket-file ctx)) (str (:tmux-socket ctx) "\n"))
   (check-helper-scripts! ctx)
   (write-sessions-file! ctx)
   (write-roles-file! ctx))
@@ -332,10 +269,6 @@
   (doseq [row (:roles ctx)
           dir ["outbox/tmp" "sent" "failed" "inbox/new" "inbox/in_process" "inbox/completed"]]
     (fs/create-dirs (fs/path (:worktree-path row) ".swarmforge" "handoffs" dir))))
-
-(defn write-tmux-env-file! [ctx]
-  (spit (str (:tmux-env-file ctx))
-        (str (sh-out "tmux" "-S" (:tmux-socket ctx) "display-message" "-p" "#{socket_path},#{pid},#{pane_id}") "\n")))
 
 (defn copy-tree-into! [src dest]
   (when (fs/directory? src)
@@ -367,9 +300,7 @@
       (sync-worktree-roles! ctx worktree-path)
       (fs/create-dirs (fs/path role-state-dir "notify"))
       (fs/copy (:sessions-file ctx) (fs/path role-state-dir "sessions.tsv") {:replace-existing true})
-      (fs/copy (:roles-file ctx) (fs/path role-state-dir "roles.tsv") {:replace-existing true})
-      (fs/copy (:tmux-socket-file ctx) (fs/path role-state-dir "tmux-socket") {:replace-existing true})
-      (fs/copy (:tmux-env-file ctx) (fs/path role-state-dir "tmux-env") {:replace-existing true}))))
+      (fs/copy (:roles-file ctx) (fs/path role-state-dir "roles.tsv") {:replace-existing true}))))
 
 (defn check-dependency! [command]
   (when-not (command-exists? command)
@@ -379,11 +310,10 @@
   (doseq [agent (map :agent (:roles ctx))]
     (check-dependency! agent)))
 
-(defn create-role-session! [ctx session title]
-  (sh "tmux" "-S" (:tmux-socket ctx) "new-session" "-d" "-s" session "-n" agent-window)
-  (sh "tmux" "-S" (:tmux-socket ctx) "set-option" "-t" session "history-limit" (str pane-history-limit))
-  (sh "tmux" "-S" (:tmux-socket ctx) "rename-window" "-t" (str session ":" agent-window) title)
-  (sh "tmux" "-S" (:tmux-socket ctx) "set-window-option" "-t" (str session ":" title) "allow-rename" "off"))
+(defn check-herdr! []
+  (check-dependency! "herdr")
+  (when-not (:ok? (herdr/cli "workspace" "list"))
+    (fail! (str red "Error:" reset " herdr is installed but its server is not running. Start herdr first."))))
 
 (def aps-tool-purpose
   {"gherkin-parser" "APS parsing"
@@ -487,50 +417,63 @@
     "--no-alt-screen "
     ""))
 
-(defn launch-command [ctx index row]
+(defn split-args
+  "ponytail: whitespace split, so a quoted extra arg containing spaces is not supported."
+  [s]
+  (if (str/blank? s) [] (str/split (str/trim s) #"\s+")))
+
+(defn agent-argv [row display role-worktree prompt-file prompt initial-prompt?]
+  (let [agent (:agent row)
+        extra (split-args (:extra-args row))
+        pf (str prompt-file)
+        wt (str role-worktree)]
+    (vec
+     (case agent
+       "claude" (concat ["--append-system-prompt-file" pf]
+                        (split-args (yolo-flag agent row))
+                        ["-n" (str "SwarmForge " display)]
+                        extra
+                        (when initial-prompt? [prompt]))
+       "codex" (concat ["-C" wt]
+                       (split-args (no-alt-screen-flag agent row))
+                       (split-args (yolo-flag agent row))
+                       extra
+                       (when initial-prompt? [prompt]))
+       "copilot" (concat ["-C" wt]
+                         (split-args (no-alt-screen-flag agent row))
+                         ["--name" (str "SwarmForge " display)]
+                         (split-args (yolo-flag agent row))
+                         extra
+                         (when initial-prompt? ["-i" prompt]))
+       "grok" (concat ["--cwd" wt]
+                      (split-args (grok-permission-prefix row))
+                      extra
+                      ["--minimal" "--rules" prompt]
+                      (when initial-prompt? ["--verbatim" prompt]))))))
+
+(defn launch-spec
+  "What to run for a role: `env` is set on the role's pane shell; `argv` goes to
+   `herdr agent start --kind <agent>`."
+  [ctx row]
   (let [role (:role row)
         agent (:agent row)
-        display (:display-name row)
         role-worktree (:worktree-path row)
         role-script-dir (if (= (str role-worktree) (str (:working-dir ctx)))
                           (:script-dir ctx)
                           (fs/path role-worktree "swarmforge" "scripts"))
         prompt-file (fs/path (:prompts-dir ctx) (str role ".md"))
         tool-bin (fs/path (:working-dir ctx) ".swarmforge" "bin")
-        prompt (str "\"$(cat " (sq (str prompt-file)) ")\"")
-        initial-prompt? (not= role "lieutenant")
-        base (str "export SWARMFORGE_ROLE=" (sq role)
-                  " && export PATH=" (sq (str tool-bin)) ":" (sq (str role-script-dir)) ":$PATH"
-                  " && cd " (sq (str role-worktree))
-                  " && ")]
+        initial-prompt? (not= role "lieutenant")]
     (write-agent-instruction-file! ctx role prompt-file (last-pack-role? ctx role))
-    (cond-> (str base
-                (case agent
-                  "claude" (str (alt-screen-env agent row)
-                                "claude --append-system-prompt-file " (sq (str prompt-file)) " "
-                                (yolo-flag agent row) "-n " (sq (str "SwarmForge " display)) " "
-                                (extra-args-prefix row)
-                                (when initial-prompt? prompt))
-                  "codex" (str "codex -C " (sq (str role-worktree)) " "
-                               (no-alt-screen-flag agent row) (yolo-flag agent row)
-                               (extra-args-prefix row)
-                               (when initial-prompt? prompt))
-                  "copilot" (str "copilot -C " (sq (str role-worktree)) " "
-                                 (no-alt-screen-flag agent row)
-                                 "--name " (sq (str "SwarmForge " display)) " "
-                                 (yolo-flag agent row) (extra-args-prefix row)
-                                 (when initial-prompt? (str "-i " prompt)))
-                  "grok" (str "grok --cwd " (sq (str role-worktree)) " "
-                              (grok-permission-prefix row) (extra-args-prefix row)
-                              "--minimal --rules " prompt
-                              (when initial-prompt? (str " --verbatim " prompt)))))
-      (= index 0)
-      (str "; exit_code=$?; SWARMFORGE_TERMINAL_BACKEND=" (sq (:terminal-backend ctx))
-           " nohup " (sq (str (fs/path (:script-dir ctx) "swarm-cleanup.sh")))
-           " " (sq (:tmux-socket ctx))
-           " " (sq (str (:window-ids-file ctx)))
-           (apply str (map #(str " " (sq (:session %))) (:roles ctx)))
-           " >/dev/null 2>&1 &!; exit $exit_code"))))
+    (let [prompt (slurp (str prompt-file))]
+      {:agent agent
+       :prompt prompt
+       :prompt-file prompt-file
+       :path-dirs [(str tool-bin) (str role-script-dir)]
+       :env (cond-> {"SWARMFORGE_ROLE" role}
+              (not (str/blank? (alt-screen-env agent row)))
+              (assoc "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN" "1"))
+       :argv (agent-argv row (:display-name row) role-worktree prompt-file prompt initial-prompt?)})))
 
 (defn codex-home []
   (or (not-empty (System/getenv "CODEX_HOME"))
@@ -557,16 +500,19 @@
               (str (ensure-newline text)
                    "\n" header "\ntrust_level = \"trusted\"\n"))))))
 
-(defn launch-role! [ctx index row]
+(defn launch-role! [ctx row]
   (when (= "codex" (:agent row))
     (ensure-codex-trust! (:worktree-path row)))
-  (let [session (:session row)
-        display (:display-name row)
-        command (launch-command ctx index row)]
-    (sh "tmux" "-S" (:tmux-socket ctx) "send-keys" "-t"
-        (tmux-agent-target display (:tmux-pane-base-index ctx) session)
-        command "Enter")
-    (println (str "  " cyan "[" display "]" reset " started in session " session))))
+  (let [display (:display-name row)
+        {:keys [agent env path-dirs argv]} (launch-spec ctx row)
+        pane (herdr/open-pane! (:working-dir ctx) display (str (:worktree-path row)) env)
+        _ (herdr/prepend-path! pane path-dirs)
+        result (herdr/start-agent! (:session row) agent pane argv)]
+    (if (:ok? result)
+      (println (str "  " cyan "[" display "]" reset " started as " (:session row)))
+      (println (str "  " yellow "[" display "]" reset " " (:session row) " is not ready: "
+                    (get-in result [:error :message])
+                    ". Answer it in herdr; the role keeps running.")))))
 
 (defn stop-handoff-daemon! [ctx]
   (process/sh {:continue true}
@@ -608,110 +554,8 @@
                   "."
                   reset))))
 
-(defn adapter-script [ctx command & args]
-  (let [script (str "SCRIPT_DIR=" (sq (str (:script-dir ctx))) "\n"
-                    "WORKING_DIR=" (sq (str (:working-dir ctx))) "\n"
-                    "TMUX_SOCKET=" (sq (:tmux-socket ctx)) "\n"
-                    "source " (sq (str (fs/path (:script-dir ctx) "swarm-terminal-adapter.sh")))
-                    " && load_terminal_backend " (sq (:terminal-backend ctx))
-                    " && " command
-                    (apply str (map #(str " " (sq %)) args)))]
-    ["zsh" "-c" script]))
-
-(defn terminal-call [ctx command & args]
-  (apply process/sh (apply adapter-script ctx command args)))
-
-(defn terminal-call-ok? [ctx command & args]
-  (zero? (:exit (apply process/sh (concat [{:continue true}] (apply adapter-script ctx command args))))))
-
-(defn terminal-call-out [ctx command & args]
-  (str/trim (:out (apply terminal-call ctx command args))))
-
-(defn skip-terminal? [row]
-  (not (:visible? row)))
-
-(defn record-window! [ctx index window-id row]
-  (spit (str (:window-ids-file ctx)) (str window-id "\n") :append true)
-  (spit (str (:window-state-file ctx))
-        (format "%d\t%s\t%s\t%s\n"
-                (inc index) window-id (:session row)
-                (str "SwarmForge " (:display-name row)))
-        :append true))
-
-(defn open-one-session! [ctx row previous-window-id]
-  (terminal-call-out ctx "terminal_open_session"
-                     (:session row)
-                     (str "SwarmForge " (:display-name row))
-                     previous-window-id))
-
-(defn open-role-terminal! [ctx row previous-window-id index]
-  (if (skip-terminal? row)
-    previous-window-id
-    (let [window-id (open-one-session! ctx row previous-window-id)]
-      (when (terminal-call-ok? ctx "terminal_backend_tracks_windows")
-        (record-window! ctx index window-id row))
-      window-id)))
-
-(defn start-window-watchdog! [ctx]
-  (process/process [(str (fs/path (:script-dir ctx) "swarm-window-watchdog.sh"))
-                    (str (:window-state-file ctx))
-                    (str (:window-ids-file ctx))
-                    "1"
-                    (:tmux-socket ctx)
-                    (str (:working-dir ctx))
-                    (:terminal-backend ctx)]
-                   {:out (str (:window-watchdog-log ctx))
-                    :err :out}))
-
-(defn open-sessions-in-terminals! [ctx]
-  (println (str "Opening separate " (terminal-call-out ctx "terminal_backend_label") " surfaces for each session..."))
-  (when (terminal-call-ok? ctx "terminal_backend_tracks_windows")
-    (spit (str (:window-ids-file ctx)) "")
-    (spit (str (:window-state-file ctx)) ""))
-  (loop [rows (:roles ctx)
-         index 0
-         previous-window-id ""]
-    (when-let [row (first rows)]
-      (let [window-id (open-role-terminal! ctx row previous-window-id index)]
-        (if (terminal-call-ok? ctx "terminal_backend_tracks_windows")
-          (recur (next rows) (inc index) window-id)
-          (recur (next rows) (inc index) previous-window-id)))))
-  (if (terminal-call-ok? ctx "terminal_backend_tracks_windows")
-    (start-window-watchdog! ctx)
-    (println (str yellow (terminal-call-out ctx "terminal_backend_label")
-                  " surfaces are not trackable; window watchdog is disabled for this backend." reset))))
-
-(defn attach-fallback! [ctx]
-  (let [row (or (first (remove skip-terminal? (:roles ctx)))
-                (first (:roles ctx)))]
-    (println (str yellow "No terminal backend found; attaching current shell to '"
-                  (:session row) "' instead." reset))
-    (sh "tmux" "-S" (:tmux-socket ctx) "attach-session" "-t" (:session row))))
-
-(defn clear-window-state! [ctx]
-  (spit (str (:window-ids-file ctx)) "")
-  (spit (str (:window-state-file ctx)) ""))
-
-(defn open-terminal-surfaces! [ctx]
-  (cond
-    (every? skip-terminal? (:roles ctx))
-    (do
-      (clear-window-state! ctx)
-      (println (str yellow "No visible Terminal surfaces; use the dashboard." reset)))
-
-    (terminal-call-ok? ctx "terminal_backend_can_open_sessions")
-    (open-sessions-in-terminals! ctx)
-
-    :else
-    (attach-fallback! ctx)))
-
-(defn terminal-plan-line [row]
-  (if (skip-terminal? row)
-    (str "skip-terminal " (:role row))
-    (str "open-terminal " (:role row))))
-
 (defn launch-plan-lines [ctx]
-  (cons "pack_web start" (map terminal-plan-line (:roles ctx))))
+  (cons "pack_web start" (map #(str "start-agent " (:role %)) (:roles ctx))))
 
 (defn wait-for-file [path timeout-ms]
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
@@ -761,12 +605,7 @@
         script-dir (fs/parent *file*)
         swarm-forge-dir (fs/path working-dir "swarmforge")
         state-dir (fs/path working-dir ".swarmforge")
-        daemon-dir (fs/path state-dir "daemon")
-        crc (java.util.zip.CRC32.)
-        _ (.update crc (.getBytes (str working-dir) java.nio.charset.StandardCharsets/UTF_8))
-        socket-id (str (.getValue crc))
-        tmux-socket-dir (fs/path "/tmp" (str "swarmforge-" (or (System/getenv "UID") (System/getProperty "user.name"))))
-        tmux-socket (str (fs/path tmux-socket-dir (str socket-id ".sock")))]
+        daemon-dir (fs/path state-dir "daemon")]
     {:working-dir working-dir
      :script-dir script-dir
      :swarm-forge-dir swarm-forge-dir
@@ -776,25 +615,14 @@
      :constitution-file (fs/path swarm-forge-dir "constitution.prompt")
      :state-dir state-dir
      :notify-dir (fs/path state-dir "notify")
-     :window-ids-file (fs/path state-dir "window-ids")
-     :window-state-file (fs/path state-dir "windows.tsv")
-     :window-watchdog-log (fs/path state-dir "window-watchdog.log")
      :sessions-file (fs/path state-dir "sessions.tsv")
      :roles-file (fs/path state-dir "roles.tsv")
      :prompts-dir (fs/path state-dir "prompts")
      :daemon-dir daemon-dir
-     :handoff-daemon-log (fs/path daemon-dir "handoffd.log")
-     :tmux-socket-dir tmux-socket-dir
-     :tmux-socket tmux-socket
-     :tmux-socket-file (fs/path state-dir "tmux-socket")
-     :tmux-env-file (fs/path state-dir "tmux-env")
-     :tmux-window-base-index 0
-     :tmux-pane-base-index 0}))
+     :handoff-daemon-log (fs/path daemon-dir "handoffd.log")}))
 
 (defn prepare-ctx [ctx]
-  (-> ctx
-      parse-config
-      (assoc :terminal-backend (detect-terminal-backend))))
+  (parse-config ctx))
 
 (defn visibility-label [row]
   (if (:visible? row) "visible" "invisible"))
@@ -820,14 +648,12 @@
 
 (defn test-start-order! [_root]
   (println "pack_web start")
-  (println "start-agents")
-  (println "open-terminals"))
+  (println "start-agents"))
 
 (defn kill-existing-sessions! [ctx]
-  (doseq [row (:roles ctx)]
-    (when (sh-ok? "tmux" "-S" (:tmux-socket ctx) "has-session" "-t" (:session row))
-      (println (str yellow "Existing SwarmForge session found: " (:session row) ". Killing it..." reset))
-      (sh "tmux" "-S" (:tmux-socket ctx) "kill-session" "-t" (:session row)))))
+  (when (herdr/workspace-id (:working-dir ctx))
+    (println (str yellow "Existing SwarmForge workspace found. Closing it..." reset))
+    (herdr/close-workspace! (:working-dir ctx))))
 
 (defn announce-ready! [ctx]
   (println)
@@ -838,33 +664,26 @@
     (println (str "  " (:display-name row) ": " (:session row))))
   (println)
   (println (str green "Tip: Write a handoff draft and run swarm_handoff.sh while the swarm is running." reset))
-  (println (str green "Tip: Reattach manually with 'tmux -S " (:tmux-socket ctx) " attach-session -t <session-name>' if needed." reset))
+  (println (str green "Tip: Watch and answer the agents in the herdr workspace '"
+                (herdr/project-slug (:working-dir ctx)) "'." reset))
   (println))
 
 (defn launch-roles! [ctx]
   (println (str green "Starting agents..." reset))
-  (let [delay-ms (env-long "SWARMFORGE_AGENT_START_DELAY_MS" 1500)]
-    (doseq [[index row] (map-indexed vector (:roles ctx))]
-      (when (pos? index)
-        (Thread/sleep delay-ms))
-      (launch-role! ctx index row))))
+  (doseq [row (:roles ctx)]
+    (launch-role! ctx row)))
 
-(defn boot-sessions! [ctx]
+(defn boot-sessions! []
   (println (str cyan bold))
   (println "  SwarmForge v1.0 Starting")
   (println "  Disciplined agents build better software")
-  (println reset)
-  (println (str green "Launching SwarmForge tmux sessions..." reset))
-  (doseq [row (:roles ctx)]
-    (create-role-session! ctx (:session row) (:display-name row)))
-  (write-tmux-env-file! ctx))
+  (println reset))
 
 (defn run-main! [root]
-  (check-dependency! "tmux")
+  (check-herdr!)
   (check-dependency! "git")
   (check-dependency! "bb")
-  (let [ctx (-> (context root)
-                detect-tmux-base-indexes)]
+  (let [ctx (context root)]
     (initialize-git-repo! ctx)
     (ensure-runtime-git-excludes! ctx)
     (install-commit-msg-hook! ctx)
@@ -873,16 +692,14 @@
       (prepare-workspace! ctx)
       (prepare-worktrees! ctx)
       (prepare-handoff-dirs! ctx)
-      (let [ctx (assoc ctx :terminal-backend (detect-terminal-backend))]
-        (stop-handoff-daemon! ctx)
-        (kill-existing-sessions! ctx)
-        (boot-sessions! ctx)
-        (sync-worktree-scripts! ctx)
-        (start-handoff-daemon! ctx)
-        (start-pack-web! ctx)
-        (launch-roles! ctx)
-        (announce-ready! ctx)
-        (open-terminal-surfaces! ctx)))))
+      (stop-handoff-daemon! ctx)
+      (kill-existing-sessions! ctx)
+      (boot-sessions!)
+      (sync-worktree-scripts! ctx)
+      (start-handoff-daemon! ctx)
+      (start-pack-web! ctx)
+      (launch-roles! ctx)
+      (announce-ready! ctx))))
 
 (defn parse-lieutenant-config [ctx]
   (let [file (:config-file ctx)
@@ -911,34 +728,22 @@
 (defn forge-root? [root]
   (fs/directory? (fs/path root "packs")))
 
-(defn session-names-from-file [ctx]
-  (let [file (:sessions-file ctx)]
-    (if (fs/regular-file? file)
-      (->> (str/split-lines (slurp (str file)))
-           (remove str/blank?)
-           (map #(nth (str/split % #"\t") 2))
-           vec)
-      [])))
-
 (defn run-stop-project! [root]
-  (let [ctx (context root)
-        socket (when (fs/regular-file? (:tmux-socket-file ctx))
-                 (not-empty (str/trim (slurp (str (:tmux-socket-file ctx))))))
-        sessions (session-names-from-file ctx)
-        script (str (fs/path (:script-dir ctx) "swarm-cleanup.sh"))]
+  (let [ctx (context root)]
+    ;; keep each role's transcript before its pane goes away
+    (process/sh {:continue true}
+                (str (fs/path (:script-dir ctx) "pack_board.sh"))
+                "archive-all" "--root" (str (:working-dir ctx)))
     (stop-handoff-daemon! ctx)
-    (when socket
-      (apply process/sh {:continue true}
-             (into [script socket (str (:window-ids-file ctx))] sessions)))))
+    (herdr/close-workspace! (:working-dir ctx))))
 
 (defn run-host! [root]
-  (check-dependency! "tmux")
+  (check-herdr!)
   (check-dependency! "git")
   (check-dependency! "bb")
-  (let [ctx (-> (context root)
-                detect-tmux-base-indexes)
+  (let [ctx (context root)
         row (lieutenant-row ctx)
-        ctx (assoc ctx :roles [row] :host? true :terminal-backend (detect-terminal-backend))]
+        ctx (assoc ctx :roles [row] :host? true)]
     (when-not (fs/exists? (fs/path (:roles-dir ctx) "lieutenant.prompt"))
       (fail! (str red "Error:" reset " Missing lieutenant prompt at "
                   (fs/path (:roles-dir ctx) "lieutenant.prompt"))))
@@ -957,18 +762,16 @@
       (fs/create-dirs (:state-dir ctx))
       (spit (str open-file) ""))
     (kill-existing-sessions! ctx)
-    (boot-sessions! ctx)
+    (boot-sessions!)
     (start-pack-web! ctx)
     (launch-roles! ctx)
-    (announce-ready! ctx)
-    (open-terminal-surfaces! ctx)))
+    (announce-ready! ctx)))
 
 (defn run-project! [root]
-  (check-dependency! "tmux")
+  (check-herdr!)
   (check-dependency! "git")
   (check-dependency! "bb")
-  (let [ctx (-> (context root)
-                detect-tmux-base-indexes)]
+  (let [ctx (context root)]
     (initialize-git-repo! ctx)
     (ensure-runtime-git-excludes! ctx)
     (install-commit-msg-hook! ctx)
@@ -977,51 +780,49 @@
       (prepare-workspace! ctx)
       (prepare-worktrees! ctx)
       (prepare-handoff-dirs! ctx)
-      (let [ctx (assoc ctx :terminal-backend (detect-terminal-backend))]
-        (stop-handoff-daemon! ctx)
-        (kill-existing-sessions! ctx)
-        (boot-sessions! ctx)
-        (sync-worktree-scripts! ctx)
-        (start-handoff-daemon! ctx)
-        (launch-roles! ctx)
-        (announce-ready! ctx)))))
+      (stop-handoff-daemon! ctx)
+      (kill-existing-sessions! ctx)
+      (boot-sessions!)
+      (sync-worktree-scripts! ctx)
+      (start-handoff-daemon! ctx)
+      (launch-roles! ctx)
+      (announce-ready! ctx))))
 
-(defn test-terminal-bridge! [root backend]
-  (let [local-script-dir (fs/path root "swarmforge" "scripts")
-        ctx (cond-> (assoc (context root) :terminal-backend backend)
-              (fs/exists? local-script-dir) (assoc :script-dir local-script-dir))]
-    (println (terminal-call-out ctx "terminal_open_session" "swarmforge-specifier" "SwarmForge Specifier" ""))))
+(defn test-launch-roles! [root]
+  (let [ctx (prepare-ctx (context root))]
+    (prepare-workspace! ctx)
+    (launch-roles! ctx)))
 
-(defn test-tmux-base-indexes! [tmux-socket]
-  (let [ctx (detect-tmux-base-indexes {:tmux-socket tmux-socket
-                                        :tmux-socket-dir (str (fs/parent (fs/path tmux-socket)))})]
-    (println (:tmux-window-base-index ctx) (:tmux-pane-base-index ctx))))
-
-(defn test-create-role-session! [tmux-socket session]
-  (create-role-session! {:tmux-socket tmux-socket} session "Specifier")
-  (println (sh-out "tmux" "-S" tmux-socket "show-options" "-t" session "-qv" "history-limit")))
+(defn print-launch-spec!
+  "Print the pane env, then `herdr agent start --kind <agent> -- <argv>` with the prompt text elided."
+  [ctx row]
+  (let [{:keys [agent env path-dirs argv prompt]} (launch-spec ctx row)]
+    (doseq [[k v] (sort env)]
+      (println (str k "=" v)))
+    (println (str "PATH=" (str/join ":" path-dirs) ":$PATH"))
+    (println (str/join " " (into [(str "kind=" agent) "--"](map #(if (= % prompt) "<prompt>" %) argv))))))
 
 (defn test-launch-command! [root agent & [extra-args]]
-  (let [ctx (assoc (context root) :terminal-backend "none")
+  (let [ctx (context root)
         row {:role "coder"
              :agent agent
-             :session "swarmforge-coder"
+             :session "sf-coder"
              :display-name "Coder"
              :worktree-name "master"
              :worktree-path (fs/path root)
              :receive-mode "task"
              :extra-args extra-args}]
     (fs/create-dirs (:prompts-dir ctx))
-    (println (launch-command ctx 1 row))))
+    (print-launch-spec! ctx row)))
 
 (defn test-lieutenant-launch-command! [root]
-  (let [ctx (assoc (context root) :terminal-backend "none")
+  (let [ctx (context root)
         row (assoc (lieutenant-row ctx) :worktree-path (fs/path root))]
     (fs/create-dirs (:prompts-dir ctx))
     (fs/create-dirs (:roles-dir ctx))
     (when-not (fs/exists? (fs/path (:roles-dir ctx) "lieutenant.prompt"))
       (spit (str (fs/path (:roles-dir ctx) "lieutenant.prompt")) "lieutenant\n"))
-    (println (launch-command ctx 1 row))))
+    (print-launch-spec! ctx row)))
 
 (defn test-install-hooks! [root]
   (let [ctx (context root)]
@@ -1047,19 +848,16 @@
     "--test-required-helpers" (test-required-helpers!)
     "--test-launch-plan" (test-launch-plan! (or (second args) (System/getProperty "user.dir")))
     "--test-start-order" (test-start-order! (or (second args) (System/getProperty "user.dir")))
-    "--test-terminal-bridge" (test-terminal-bridge! (or (second args) (System/getProperty "user.dir")) (nth args 2))
+    "--test-launch-roles" (test-launch-roles! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-command" (apply test-launch-command!
                                      (or (second args) (System/getProperty "user.dir"))
                                      (drop 2 args))
     "--test-lieutenant-launch-command" (test-lieutenant-launch-command!
                                         (or (second args) (System/getProperty "user.dir")))
     "--test-install-hooks" (test-install-hooks! (second args))
-    "--test-agent-start-delay" (println (env-long "SWARMFORGE_AGENT_START_DELAY_MS" 1500))
     "--test-sleep-inhibitor-prefix" (test-sleep-inhibitor-prefix!)
     "--test-ensure-codex-trust" (test-ensure-codex-trust! (second args))
     "--test-reset-pack-web-state" (test-reset-pack-web-state! (second args))
-    "--test-tmux-base-indexes" (test-tmux-base-indexes! (second args))
-    "--test-create-role-session" (test-create-role-session! (second args) (nth args 2))
     "--start-project" (run-project! (second args))
     "--stop-project" (run-stop-project! (second args))
     (let [root (or (first args) (System/getProperty "user.dir"))]

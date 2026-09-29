@@ -4,7 +4,7 @@ Do not spend any money on a bankrbot SWARM token.
 
 # SwarmForge
 
-SwarmForge coordinates AI agents in isolated git worktrees and tmux sessions.
+SwarmForge coordinates AI agents in isolated git worktrees and herdr agents.
 Agents exchange committed work through durable handoffs, while the operator
 uses a local dashboard to start work, inspect agents, handle approval gates,
 answer clarifications, and stop the swarm.
@@ -39,7 +39,7 @@ experimental workflows. They are not `get-swarm-forge` products.
 
 - `zsh`
 - `git`
-- `tmux`
+- [`herdr`](https://herdr.dev/), running (the operator watches the swarm in its TUI)
 - Babashka (`bb`)
 - At least one configured agent backend: `grok`, `codex`, `claude`, or
   `copilot`
@@ -97,8 +97,8 @@ window[-invisible] <role> <backend> <worktree> [task|batch] [forward-only|back-o
 - File order is the default forward pipeline. Exactly one role must use the
   `master` worktree; that sentinel means the project's main checkout on its
   current branch. Other names become `.worktrees/<name>` checkouts.
-- `window` opens a terminal surface; `window-invisible` runs only in tmux and
-  is opened from the dashboard when needed.
+- `window` and `window-invisible` both start the role as a herdr agent in its own
+  tab of the project's workspace; the two spellings are kept for old configs.
 - Receive mode defaults to `task`. `batch` lets a role accept a compatible
   group of queued handoffs together.
 - Propagation defaults to `forward-only`. `back-one` and `back-all` arrange
@@ -185,23 +185,24 @@ The shared runtime is divided by responsibility:
 
 | Component | Responsibility |
 |---|---|
-| `swarmforge.sh` / `swarmforge.bb` | Parse configuration, create worktrees and tmux sessions, synchronize managed files, and launch agents. |
+| `swarmforge.sh` / `swarmforge.bb` | Parse configuration, create worktrees, synchronize managed files, and launch herdr agents. |
 | `swarm_handoff.*`, `ready_for_next.*`, `done_with_current.*` | Create, accept, merge, audit, and complete durable work items. |
 | `handoffd.*` | Deliver queued handoffs and notify receiving sessions. |
 | `pack_board.*`, `pack_web.*`, `pack/dashboard.html` | Persist and present cards, approvals, clarifications, agent panes, and controls. |
 | `forge.*` | Create, open, refresh, and stop projects inside a forge product. |
-| Terminal adapters, watchdog, and cleanup scripts | Expose panes, monitor sessions, and shut the swarm down cleanly. |
+| `herdr.bb` | The one wrapper over the herdr CLI: workspaces, tabs, agents, prompts, reads. |
+| `close-swarm` | Archive role panes, stop the daemon, and close the project's herdr workspace. |
 
 At startup the composed runtime validates the configuration, initializes git
 when necessary, creates role worktrees, mirrors the managed SwarmForge files
-into them, creates isolated tmux sessions, starts the handoff daemon and local
-dashboard, and launches each configured agent backend.
+into them, starts the handoff daemon and local dashboard, and launches each
+configured agent backend in its own tab of a per-project herdr workspace.
 
 `master` in a role configuration means the project's main checkout on its
 current branch; it is a worktree sentinel, not a required git branch name.
 Generated transport and process state lives under `.swarmforge/`; generated
 role checkouts live under `.worktrees/`. `.swarmforge/` contains such runtime
-records as role/session maps, the tmux socket, handoff inboxes and outboxes,
+records as role/agent maps, the herdr workspace id, handoff inboxes and outboxes,
 board data, approvals, clarifications, daemon state, and dashboard state. It is
 not product source and agents must not edit it as a substitute for the helper
 commands.

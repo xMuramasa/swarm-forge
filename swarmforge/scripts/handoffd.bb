@@ -18,10 +18,10 @@
 (def once? false)
 (def project-root nil)
 (def script-dir (fs/parent *file*))
+(load-file (str (fs/path script-dir "herdr.bb")))
 (def state-dir nil)
 (def daemon-dir nil)
 (def roles-file nil)
-(def socket-file nil)
 (def pid-file nil)
 (def stop-file nil)
 (def log-file nil)
@@ -41,7 +41,6 @@
        (alter-var-root #'state-dir (constantly state))
        (alter-var-root #'daemon-dir (constantly daemon))
        (alter-var-root #'roles-file (constantly (fs/path state "roles.tsv")))
-       (alter-var-root #'socket-file (constantly (fs/path state "tmux-socket")))
        (alter-var-root #'pid-file (constantly (fs/path daemon "handoffd.pid")))
        (alter-var-root #'stop-file (constantly (fs/path daemon "stop")))
        (alter-var-root #'log-file (constantly (fs/path daemon "handoffd.log")))))))
@@ -110,18 +109,14 @@
   (fs/path (:worktree-path role-info)
            ".swarmforge" "handoffs" "inbox" "new" filename))
 
-(defn notify! [socket session]
-  (let [send-text (sh "tmux" "-S" socket "send-keys" "-t" session "-l" wake-message)
-        _ (Thread/sleep 150)
-        send-carriage-return (sh "tmux" "-S" socket "send-keys" "-t" session "C-m")
-        _ (Thread/sleep 50)
-        send-line-feed (sh "tmux" "-S" socket "send-keys" "-t" session "C-j")]
-    (when-not (zero? (:exit send-text))
-      (throw (ex-info "tmux send text failed" send-text)))
-    (when-not (zero? (:exit send-carriage-return))
-      (throw (ex-info "tmux send carriage return failed" send-carriage-return)))
-    (when-not (zero? (:exit send-line-feed))
-      (throw (ex-info "tmux send line feed failed" send-line-feed)))))
+(defn notify!
+  "Wake the agent. The message is already in its inbox, so a refused wake (agent
+   blocked on a dialog, or gone) is logged, not fatal: ready_for_next finds it later."
+  [session]
+  (try
+    (herdr/prompt! session wake-message)
+    (catch Exception e
+      (log! "wake-failed" session (.getMessage e)))))
 
 (defn move-with-collision [source target-dir]
   (fs/create-dirs target-dir)
@@ -340,14 +335,14 @@
          (not (role-has-inbox-state? role-info "in_process"))
          (empty? (active-outbound-git-files roles sender-role)))))
 
-(defn maybe-notify-unblocked-sender! [roles socket headers sender-role]
+(defn maybe-notify-unblocked-sender! [roles headers sender-role]
   (when (and (approved-git-handoff? headers)
              (sender-ready-work? roles sender-role)
              (not (contains? (set (recipient-list headers)) sender-role)))
-    (notify! socket (get-in roles [sender-role :session]))
+    (notify! (get-in roles [sender-role :session]))
     (log! "notified-unblocked-sender" sender-role)))
 
-(defn deliver! [roles socket sender-role path]
+(defn deliver! [roles sender-role path]
   (let [filename (fs/file-name path)
         message (parse-message path)
         headers (:headers message)
@@ -365,10 +360,10 @@
               (fs/create-dirs (fs/parent target))
               (when-not (fs/exists? target)
                 (spit (str target) (render-message (:headers delivered) (:body delivered))))
-              (notify! socket (:session role-info)))))
+              (notify! (:session role-info)))))
         (move-with-collision path (sent-dir roles sender-role))
         (archive-sender! headers)
-        (maybe-notify-unblocked-sender! roles socket headers sender-role)
+        (maybe-notify-unblocked-sender! roles headers sender-role)
         (log! "delivered" (str path))))))
 
 (defn outbox-files [role-info]
@@ -389,17 +384,16 @@
         (Thread/sleep step)
         (recur (- remaining step))))))
 
-(defn process-outbox-file! [roles socket path]
+(defn process-outbox-file! [roles path]
   (let [headers (:headers (parse-message path))
         from (get headers "from")]
     (if (should-hold? roles headers)
       (hold! (fs/path path))
-      (deliver! roles socket (or from "") (fs/path path)))))
+      (deliver! roles (or from "") (fs/path path)))))
 
 (defn poll-once! []
   (when-not (should-stop?)
     (let [roles (load-roles)
-          socket (str/trim (slurp (str socket-file)))
           paths (->> (concat (mapcat #(or (outbox-files %) []) (vals roles))
                              (or (outbox-files {:worktree-path project-root}) []))
                      (map str)
@@ -407,7 +401,7 @@
       (doseq [path paths
               :while (not (should-stop?))]
         (try
-          (process-outbox-file! roles socket path)
+          (process-outbox-file! roles path)
           (catch Exception e
             (log! "error" path (.getMessage e))
             (try

@@ -10,6 +10,7 @@
 
 (def script-dir (fs/parent *file*))
 (load-file (str (fs/path script-dir "forge.bb")))
+(load-file (str (fs/path script-dir "herdr.bb")))
 
 (def usage-text
   (str "Usage:\n"
@@ -52,16 +53,14 @@
 (def example-task-text
   "Integrate the stories in ~/junk/htw-stories into one console application.")
 
-(def ^:dynamic *tmux-stub* nil)
 (def ^:dynamic *pane-text* nil)
 (def ^:dynamic *sync-teardown?* false)
 (def teardown-delay-ms 250)
-(def pane-capture-lines 2000)
 (def pane-heat (atom {}))
 (def pane-status (atom {}))
 (def pane-status-lines (atom {}))
 
-(declare session-name pane-target live-pane-text role-row pane-sample backend-name
+(declare session-name live-pane-text role-row pane-sample backend-name
          in-process-for-row in-process-task-names approvals
          handoff-files batch-dirs in-process-dir allowed-doc?
          delete-approval! retry-approval! parse-message pane-status-for role-rows
@@ -90,22 +89,6 @@
 (defn reject-message [task]
   (str "Rejected: " task))
 
-(defn tmux-stub []
-  (or *tmux-stub* (System/getenv "SWARMFORGE_TMUX_STUB")))
-
-(defn record-argv! [file argv]
-  (when-let [dir (fs/parent file)]
-    (fs/create-dirs dir))
-  (spit (str file) (str (pr-str (vec argv)) "\n") :append true))
-
-(defn send-keys! [socket session & keys]
-  (let [argv (into ["tmux" "-S" socket "send-keys" "-t" session] keys)]
-    (if-let [stub (tmux-stub)]
-      (record-argv! stub argv)
-      (let [result (apply sh argv)]
-        (when-not (zero? (:exit result))
-          (throw (ex-info "tmux send-keys failed" result)))))))
-
 (defn role-rows [root]
   (let [file (fs/path root ".swarmforge" "roles.tsv")]
     (if (fs/exists? file)
@@ -121,33 +104,17 @@
   (when-let [row (master-row root)]
     (session-name row)))
 
-(defn tmux-socket [root]
-  (let [file (fs/path root ".swarmforge" "tmux-socket")]
-    (when (fs/exists? file)
-      (not-empty (str/trim (slurp (str file)))))))
-
-(defn inject-target! [socket target text]
-  (when (and socket target (not (str/blank? text)))
-    (send-keys! socket target "-l" text)
-    (when-not (tmux-stub)
-      (Thread/sleep 150))
-    (send-keys! socket target "C-m")
-    (when-not (tmux-stub)
-      (Thread/sleep 50))
-    (send-keys! socket target "C-j")))
-
 (defn inject-role! [root role text]
   (try
-    (let [socket (tmux-socket root)
-          target (when-let [row (role-row root role)]
-                   (pane-target row))]
-      (when-not (and socket target)
-        (throw (ex-info "missing tmux target" {:role role :socket socket})))
-      (inject-target! socket target text))
+    (let [target (when-let [row (role-row root role)]
+                   (session-name row))]
+      (when-not target
+        (throw (ex-info "missing herdr agent" {:role role})))
+      (when-not (str/blank? text)
+        (herdr/prompt! target text)))
     (catch Exception e
       (binding [*out* *err*]
         (println (str "inject failed role=" role
-                      " socket=" (tmux-socket root)
                       " error=" (.getMessage e)))
         (flush)))))
 
@@ -542,10 +509,8 @@
 (defn in-process-dir [worktree]
   (fs/path worktree ".swarmforge" "handoffs" "inbox" "in_process"))
 
-(defn session-alive? [socket session]
-  (boolean
-   (when (and socket session)
-     (zero? (:exit (sh "tmux" "-S" socket "has-session" "-t" session))))))
+(defn session-alive? [session]
+  (boolean (and session (herdr/alive? session))))
 
 (defn role-queue-state [alive? busy?]
   (cond
@@ -563,15 +528,8 @@
   (let [role (first row)
         session (nth row 3 nil)]
     (if (str/blank? session)
-      (str "swarmforge-" role)
+      (str "sf-" (herdr/clean role))
       session)))
-
-(defn pane-target [row]
-  (let [session (session-name row)
-        window (nth row 4 nil)]
-    (if (str/blank? window)
-      session
-      (str session ":" window ".0"))))
 
 (defn backend-name [row]
   (str/lower-case (or (nth row 5 nil) "")))
@@ -640,7 +598,7 @@
       (in-process-task-names (handoff-files (first batches)))
       [])))
 
-(defn work-row-for-role [root socket row all-tasks]
+(defn work-row-for-role [root row all-tasks]
   (let [role (first row)
         files (in-process-for-row row)
         path (first files)
@@ -648,7 +606,7 @@
         cards (cards-in-lane all-tasks role)
         card (first cards)
         busy? (boolean (or path card))
-        alive? (session-alive? socket (session-name row))
+        alive? (session-alive? (session-name row))
         text (live-pane-text root role)
         names (work-task-names files cards)
         batch-names (in-process-batch-task-names row)]
@@ -657,9 +615,8 @@
                (or (:updated_at from-file) (:updated_at card) ""))))
 
 (defn work-in-flight [root]
-  (let [socket (tmux-socket root)
-        all-tasks (tasks root)]
-    (mapv #(work-row-for-role root socket % all-tasks) (role-rows root))))
+  (let [all-tasks (tasks root)]
+    (mapv #(work-row-for-role root % all-tasks) (role-rows root))))
 
 (defn chat-pending-dir [root]
   (fs/path root ".swarmforge" "dashboard" "requests" "pending"))
@@ -1400,20 +1357,11 @@
   (when-let [row (role-row root role)]
     (nth row 2 nil)))
 
-(defn tmux-capture [socket target]
-  (try
-    (let [result (sh "tmux" "-S" socket "capture-pane" "-p" "-t" target
-                     "-S" (str "-" pane-capture-lines))]
-      (when (zero? (:exit result))
-        (:out result)))
-    (catch Exception _)))
-
 (defn capture-pane [root role]
   (when-let [row (role-row root role)]
-    (let [socket (tmux-socket root)]
-      (when socket
-        (or (tmux-capture socket (pane-target row))
-            (tmux-capture socket (session-name row)))))))
+    (try
+      (herdr/read-text (session-name row))
+      (catch Exception _))))
 
 (defn live-pane-text [root role]
   (or *pane-text*
@@ -1609,51 +1557,15 @@
       (sh "kill" "-TERM" pid))
     (fs/delete-if-exists file)))
 
-(defn list-tmux-sessions [socket]
-  (if (str/blank? socket)
-    []
-    (let [result (sh "tmux" "-S" socket "list-sessions" "-F" "#{session_name}")]
-      (if (zero? (:exit result))
-        (->> (str/split-lines (:out result))
-             (remove str/blank?)
-             vec)
-        []))))
-
-(defn kill-session! [socket session]
-  (sh "tmux" "-S" socket "kill-session" "-t" (str "=" session))
-  (sh "tmux" "-S" socket "kill-session" "-t" session))
-
-(defn kill-all-sessions-on-socket! [socket]
-  (when-not (str/blank? socket)
-    (doseq [session (list-tmux-sessions socket)]
-      (kill-session! socket session))
-    (sh "tmux" "-S" socket "kill-server")))
-
 (defn stop-handoffd! [root]
   (sh "bb" (str (fs/path script-dir "stop_handoff_daemon.bb")) (str root)))
-
-(defn swarm-cleanup! [root socket]
-  (let [script (str (fs/path script-dir "swarm-cleanup.sh"))
-        ids (str (fs/path root ".swarmforge" "window-ids"))]
-    (apply sh (into [script (or socket "none") ids]
-                    (list-tmux-sessions socket)))))
-
-(defn close-swarm-bin []
-  (let [path (fs/path (fs/parent (fs/parent script-dir)) "close-swarm")]
-    (when (fs/exists? path)
-      (str path))))
-
-(defn close-swarm! [root]
-  (if-let [bin (close-swarm-bin)]
-    (sh bin (str root))
-    (swarm-cleanup! root (tmux-socket root))))
 
 (defn run-teardown! [root]
   (when (forge/forge? root)
     (forge/close-all-projects! root))
-  (close-swarm! root)
+  (pack-board-result root "archive-all")
   (stop-handoffd! root)
-  (kill-all-sessions-on-socket! (tmux-socket root))
+  (herdr/close-workspace! root)
   (stop-pack-web! root)
   true)
 
@@ -1815,7 +1727,7 @@
 (defn test-inject-argv! [root file text]
   (when (str/blank? file)
     (exit! 1 "Missing argv file"))
-  (binding [*tmux-stub* file]
+  (binding [herdr/*stub* file]
     (inject-master! (require-root! root) text)))
 
 (defn test-http! [resp]

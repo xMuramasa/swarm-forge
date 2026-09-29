@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [clojure.java.shell :as sh]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [swarmforge.fake-herdr :as fake-herdr]))
 
 (def repo-root (fs/cwd))
 (def scripts-dir (fs/path repo-root "swarmforge" "scripts"))
@@ -16,6 +17,7 @@
   (let [result (apply sh/sh (concat args [:dir (str dir)
                                           :env (merge {"PATH" (System/getenv "PATH")
                                                        "GIT_CONFIG_NOSYSTEM" "1"}
+                                                      (fake-herdr/env dir)
                                                       env)]))]
     (when (and (not (false? ok?)) (not= 0 (:exit result)))
       (throw (ex-info (str "Command failed: " (str/join " " args))
@@ -105,24 +107,8 @@
         (is (str/includes? (:out result) "coder Coder"))
         (is (str/includes? (:out result) "cleaner Cleaner"))
         (is (str/includes? (:out result) "cleaner batch"))
-        (is (str/includes? (:out result) "swarmforge-coder"))
-        (is (str/includes? (:out result) "swarmforge-cleaner"))
-        (is (fs/exists? (fs/path root ".swarmforge/tmux-socket"))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest swarmforge-uses-portable-tmux-socket-dir
-  (let [root (tmp-dir)]
-    (try
-      (write-file (fs/path root "swarmforge/constitution.prompt")
-                  "Read articles.\n")
-      (write-file (fs/path root "swarmforge/swarmforge.conf")
-                  "window coder codex master\n")
-      (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
-      (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))
-      (let [socket-path (str/trim (slurp (str (fs/path root ".swarmforge/tmux-socket"))))]
-        (is (str/starts-with? socket-path "/tmp/swarmforge-"))
-        (is (not (str/starts-with? socket-path "/private/tmp/"))))
+        (is (re-find #"\bsf-\S+-coder\b" (:out result)))
+        (is (re-find #"\bsf-\S+-cleaner\b" (:out result))))
       (finally
         (fs/delete-tree root)))))
 
@@ -174,10 +160,10 @@
   (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
   (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n"))
 
-(deftest swarmforge-launch-plan-starts-pack-web-and-skips-invisible-terminals
+(deftest swarmforge-launch-plan-starts-pack-web-and-every-agent
   ;; Given window-invisible specifier and a visible coder window
   ;; When --test-launch-plan
-  ;; Then pack_web starts, specifier skips Terminal, and coder still opens Terminal
+  ;; Then pack_web starts and both roles get an agent, invisible or not
   (let [root (tmp-dir)]
     (try
       (write-pack-conf! root
@@ -186,10 +172,35 @@
       (let [out (:out (run {:dir root} (script "swarmforge.bb")
                            "--test-launch-plan" (str root)))]
         (is (str/includes? out "pack_web start"))
-        (is (str/includes? out "skip-terminal specifier"))
-        (is (str/includes? out "open-terminal coder"))
-        (is (not (str/includes? out "skip-terminal coder")))
-        (is (not (str/includes? out "open-terminal specifier"))))
+        (is (str/includes? out "start-agent specifier"))
+        (is (str/includes? out "start-agent coder")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-launch-gives-each-role-a-tab-and-starts-its-agent
+  ;; Given a claude coder on master and a claude cleaner
+  ;; When the launcher starts the roles against herdr
+  ;; Then one workspace holds a tab per role, and each agent is started by name in its own pane
+  (let [root (tmp-dir)]
+    (try
+      (write-pack-conf! root
+                        (str "window coder claude master\n"
+                             "window cleaner claude cleaner\n"))
+      (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
+      (run {:dir root} (script "swarmforge.bb") "--test-launch-roles" (str root))
+      (let [calls (fake-herdr/calls root)
+            starts (filter #(str/starts-with? % "agent start") calls)]
+        (is (= 1 (count (filter #(str/starts-with? % "workspace create") calls))))
+        (is (= 1 (count (filter #(str/starts-with? % "tab create --workspace w1") calls))))
+        (is (some #(and (str/starts-with? % "workspace create")
+                        (str/includes? % "--env SWARMFORGE_ROLE=coder")) calls))
+        (is (some #(and (str/starts-with? % "tab create")
+                        (str/includes? % "--env SWARMFORGE_ROLE=cleaner")) calls))
+        (is (some #(re-find #"^pane run w1:p1 export PATH='[^']*/\.swarmforge/bin':" %) calls))
+        (is (some #(re-find #"^pane run w1:p2 export PATH='[^']*/\.swarmforge/bin':" %) calls))
+        (is (re-find #"^agent start sf-\S+-coder --kind claude --pane w1:p1 " (first starts)))
+        (is (re-find #"^agent start sf-\S+-cleaner --kind claude --pane w1:p2 " (second starts)))
+        (is (= "w1" (str/trim (slurp (str (fs/path root ".swarmforge/herdr-workspace")))))))
       (finally
         (fs/delete-tree root)))))
 
@@ -228,45 +239,6 @@
         (is (str/includes? (:err result) "master")))
       (finally
         (fs/delete-tree root)))))
-
-(deftest swarmforge-terminal-bridge-preserves-adapter-globals
-  (let [root (tmp-dir)]
-    (try
-      (write-file (fs/path root "swarmforge/scripts/swarm-terminal-adapter.sh")
-                  (str "load_terminal_backend() {\n"
-                       "  source \"$SCRIPT_DIR/terminal-adapters/$1.sh\"\n"
-                       "}\n"))
-      (write-file (fs/path root "swarmforge/scripts/terminal-adapters/probe.sh")
-                  (str "terminal_open_session() {\n"
-                       "  printf '%s\\n' \"$WORKING_DIR|$TMUX_SOCKET|$1|$2|$3\"\n"
-                       "}\n"))
-      (let [result (run {:dir root}
-                        (script "swarmforge.bb")
-                        "--test-terminal-bridge"
-                        (str root)
-                        "probe")]
-        (is (str/includes? (:out result) (str root "|")))
-        (is (str/includes? (:out result) "|swarmforge-specifier|SwarmForge Specifier|"))
-        (is (not (str/includes? (:out result) "cd ''")))
-        (is (not (str/includes? (:out result) "-S ''"))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest swarmforge-agent-start-delay-is-configurable
-  (let [default-result (run {:dir repo-root}
-                            (script "swarmforge.bb")
-                            "--test-agent-start-delay")
-        configured-result (run {:dir repo-root
-                                :env {"SWARMFORGE_AGENT_START_DELAY_MS" "2750"}}
-                               (script "swarmforge.bb")
-                               "--test-agent-start-delay")
-        invalid-result (run {:dir repo-root
-                             :env {"SWARMFORGE_AGENT_START_DELAY_MS" "fast"}}
-                            (script "swarmforge.bb")
-                            "--test-agent-start-delay")]
-    (is (= "1500" (str/trim (:out default-result))))
-    (is (= "2750" (str/trim (:out configured-result))))
-    (is (= "1500" (str/trim (:out invalid-result))))))
 
 (deftest swarmforge-sleep-prevention-can-be-disabled
   (let [result (run {:dir repo-root
@@ -353,8 +325,8 @@
                         "copilot"
                         "--yolo")
             command (:out result)]
-        (is (str/includes? command "copilot -C "))
-        (is (re-find #"--name 'SwarmForge Coder' --yolo -i" command)))
+        (is (str/includes? command "kind=copilot -- -C "))
+        (is (re-find #"--name SwarmForge Coder --yolo -i" command)))
       (finally
         (fs/delete-tree root)))))
 
@@ -367,11 +339,10 @@
                         (str root)
                         "grok")
             command (:out result)]
-        (is (str/includes? command "grok --cwd "))
+        (is (str/includes? command "kind=grok -- --cwd "))
         (is (str/includes? command "--permission-mode bypassPermissions"))
-        (is (str/includes? command "--rules \"$(cat "))
-        (is (str/includes? command "--verbatim \"$(cat "))
-        (is (str/includes? command ".swarmforge/prompts/coder.md"))
+        (is (str/includes? command "--rules <prompt>"))
+        (is (str/includes? command "--verbatim <prompt>"))
         (is (fs/exists? (fs/path root ".swarmforge/prompts/coder.md"))))
       (finally
         (fs/delete-tree root)))))
@@ -404,9 +375,8 @@
                                (script "swarmforge.bb")
                                "--test-lieutenant-launch-command"
                                (str root)))]
-        (is (str/includes? command "grok --cwd "))
-        (is (str/includes? command "--minimal --rules \"$(cat "))
-        (is (str/includes? command ".swarmforge/prompts/lieutenant.md"))
+        (is (str/includes? command "kind=grok -- --cwd "))
+        (is (str/includes? command "--minimal --rules <prompt>"))
         (is (not (str/includes? command "--verbatim")))
         (is (fs/exists? (fs/path root ".swarmforge/prompts/lieutenant.md"))))
       (finally
@@ -423,16 +393,16 @@
                                (script "swarmforge.bb")
                                "--test-lieutenant-launch-command"
                                (str root)))]
-        (is (str/includes? command "claude --append-system-prompt-file "))
+        (is (str/includes? command "kind=claude -- --append-system-prompt-file "))
         (is (str/includes? command "--yolo"))
-        (is (not (str/includes? command "grok --cwd "))))
+        (is (not (str/includes? command "kind=grok"))))
       (finally
         (fs/delete-tree root)))))
 
 (deftest grok-launch-command-uses-minimal-for-scrollback
   ;; Given a grok pack role
   ;; When SwarmForge builds the launch command
-  ;; Then grok runs --minimal so finalized chatter is in tmux scrollback
+  ;; Then grok runs --minimal so finalized chatter is in scrollback
   (let [root (tmp-dir)]
     (try
       (let [command (:out (run {:dir root}
@@ -444,7 +414,7 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest launch-command-puts-transcript-in-tmux-scrollback
+(deftest launch-command-puts-transcript-in-scrollback
   ;; Given each pack backend
   ;; When SwarmForge builds the launch command
   ;; Then Codex and Copilot use --no-alt-screen, Claude disables the
@@ -510,7 +480,7 @@
                                "--test-launch-command"
                                (str root)
                                "codex"))]
-        (is (str/includes? command (str ".swarmforge/bin':'"))))
+        (is (str/includes? command ".swarmforge/bin:")))
       (finally
         (fs/delete-tree root)))))
 
@@ -797,85 +767,13 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest window-watchdog-rewrites-window-state-and-id-list
-  (let [root (tmp-dir)
-        state-file (fs/path root "windows.tsv")
-        ids-file (fs/path root "window-ids")]
-    (try
-      (write-file state-file
-                  (str "1\told-a\tswarmforge-coder\tSwarmForge Coder\n"
-                       "2\told-b\tswarmforge-cleaner\tSwarmForge Cleaner\n"))
-      (write-file ids-file "old-a\nold-b\n")
-      (run {:dir root} (script "swarm_window_watchdog.bb") "--rewrite-window-id" "windows.tsv" "window-ids" "2" "new-b")
-      (let [state (slurp (str state-file))
-            ids (slurp (str ids-file))]
-        (is (str/includes? state "1\told-a\tswarmforge-coder\tSwarmForge Coder"))
-        (is (str/includes? state "2\tnew-b\tswarmforge-cleaner\tSwarmForge Cleaner"))
-        (is (= "old-a\nnew-b\n" ids)))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest swarmforge-detects-nonzero-pane-base-index
-  (let [root (tmp-dir)
-        sock (str root "/test.sock")
-        conf (fs/path root "tmux.conf")]
-    (try
-      (write-file conf "set -g base-index 1\nset -g pane-base-index 1\n")
-      (run {:dir root} "tmux" "-S" sock "-f" (str conf) "new-session" "-d" "-s" "probe" "sleep" "120")
-      (let [result (run {:dir root}
-                        (script "swarmforge.bb")
-                        "--test-tmux-base-indexes"
-                        sock)]
-        (is (= "1 1" (str/trim (:out result)))))
-      (finally
-        (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
-        (fs/delete-tree root)))))
-
-(deftest role-session-keeps-tmux-scrollback
-  ;; Given a tmux socket
-  ;; When SwarmForge creates a role session
-  ;; Then history-limit keeps thousands of lines
-  (let [root (tmp-dir)
-        sock (str root "/test.sock")
-        conf (fs/path root "tmux.conf")]
-    (try
-      (write-file conf "set -g history-limit 50\n")
-      (run {:dir root} "tmux" "-S" sock "-f" (str conf) "new-session" "-d" "-s" "probe" "sleep" "120")
-      (let [result (run {:dir root}
-                        (script "swarmforge.bb")
-                        "--test-create-role-session"
-                        sock
-                        "swarmforge-specifier")
-            limit (Long/parseLong (str/trim (:out result)))]
-        (is (zero? (:exit result)))
-        (is (>= limit 2000)))
-      (finally
-        (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
-        (fs/delete-tree root)))))
-
-(deftest swarm-cleanup-tolerates-missing-runtime-state
-  (let [root (tmp-dir)
-        ids-file (fs/path root ".swarmforge/window-ids")]
-    (try
-      (write-file ids-file "window-a\nwindow-b\n")
-      (let [result (run {:dir root
-                         :env {"SWARMFORGE_TERMINAL_BACKEND" "none"}}
-                        (str (fs/path scripts-dir "swarm-cleanup.sh"))
-                        "/tmp/nonexistent.sock"
-                        (str ids-file))]
-        (is (= 0 (:exit result)))
-        (is (= "" (:err result))))
-      (finally
-        (fs/delete-tree root)))))
-
 (defn close-swarm []
   (str (fs/path repo-root "close-swarm")))
 
 (deftest close-swarm-reports-when-no-swarm-state
   (let [root (tmp-dir)]
     (try
-      (let [result (run {:dir root :ok? false
-                         :env {"SWARMFORGE_TERMINAL_BACKEND" "none"}}
+      (let [result (run {:dir root :ok? false}
                         (close-swarm)
                         (str root))]
         (is (not= 0 (:exit result)))
@@ -883,36 +781,23 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest close-swarm-kills-tmux-sessions-and-stops-daemon
+(deftest close-swarm-closes-the-workspace-and-stops-daemon
   (let [root (tmp-dir)
-        sock (str (fs/path root "swarm.sock"))
         pid-file (fs/path root ".swarmforge/daemon/handoffd.pid")
         daemon (.start (java.lang.ProcessBuilder. ["sleep" "120"]))
         pid (str (.pid daemon))]
     (try
-      (write-file (fs/path root ".swarmforge/tmux-socket") (str sock "\n"))
-      (write-file (fs/path root ".swarmforge/sessions.tsv")
-                  (str "1\tcoder\tswarmforge-coder\tCoder\tcodex\n"
-                       "2\tcleaner\tswarmforge-cleaner\tCleaner\tcodex\n"))
-      (write-file (fs/path root ".swarmforge/window-ids") "win-a\nwin-b\n")
+      (write-file (fs/path root ".swarmforge/herdr-workspace") "w7\n")
       (write-file pid-file (str pid "\n"))
-      (run {:dir root} "tmux" "-S" sock "new-session" "-d" "-s" "swarmforge-coder" "sleep" "120")
-      (run {:dir root} "tmux" "-S" sock "new-session" "-d" "-s" "swarmforge-cleaner" "sleep" "120")
-      (let [result (run {:dir root
-                         :env {"SWARMFORGE_TERMINAL_BACKEND" "none"}}
-                        (close-swarm)
-                        (str root))]
+      (let [result (run {:dir root} (close-swarm) (str root))]
         (is (= 0 (:exit result)))
-        (is (not= 0 (:exit (run {:dir root :ok? false}
-                                "tmux" "-S" sock "has-session" "-t" "swarmforge-coder"))))
-        (is (not= 0 (:exit (run {:dir root :ok? false}
-                                "tmux" "-S" sock "has-session" "-t" "swarmforge-cleaner"))))
+        (is (= ["w7"] (fake-herdr/closed root)))
+        (is (not (fs/exists? (fs/path root ".swarmforge/herdr-workspace"))))
         (is (not (fs/exists? pid-file)))
         (is (false? (.isAlive daemon))))
       (finally
         (when (.isAlive daemon)
           (.destroyForcibly daemon))
-        (run {:dir root :ok? false} "tmux" "-S" sock "kill-server")
         (fs/delete-tree root)))))
 
 (defn write-echo-tool! [root tool]
@@ -1130,4 +1015,3 @@
         (fs/delete-tree host)
         (fs/delete-tree base)
         (fs/delete-tree packs)))))
-

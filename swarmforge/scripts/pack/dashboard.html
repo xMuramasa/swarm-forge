@@ -1419,7 +1419,7 @@ async function sendChat() {
 }
 
 async function teardownSwarm() {
-  if (!confirm("Stop this swarm? Agent sessions and tmux windows will be terminated. Project files stay on disk.")) return;
+  if (!confirm("Stop this swarm? The project's herdr workspace and its agents will be closed. Project files stay on disk.")) return;
   const btn = $("teardown-btn");
   if (btn) {
     btn.disabled = true;

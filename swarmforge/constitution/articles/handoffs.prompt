@@ -47,7 +47,7 @@ message: <one line, max 80 chars>
 - After a successful send, the helper removes the draft file. If you need to
   remove a stale draft manually, use `rm <draft-file>`, not `rm -f`.
 - Do not write long handoff bodies. The helper generates the delivered payload.
-- Do not send tmux notifications directly.
+- Do not prompt other agents directly.
 - Do not hand-edit, merge, stage, or commit handoff runtime state.
 
 ## Receiving Handoffs
@@ -73,7 +73,7 @@ message: <one line, max 80 chars>
 - If it prints `BATCH: <path>`, treat each printed `BATCH_ITEM` as part of the
   current batch in helper-delivered order.
 - Use only the task information printed by the helper scripts.
-- If a tmux wake-up arrives while already working on a task, ignore it.
+- If a wake-up prompt arrives while already working on a task, ignore it.
 - When the task or batch is fully complete, run `done_with_current.sh`. After a
   reverse (`non-forwarding`) merge, that is the completion; do not queue a
   `git_handoff` for that inbound.

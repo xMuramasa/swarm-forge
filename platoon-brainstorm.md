@@ -135,7 +135,7 @@ platoon/                         # integration worktree
 ```
 
 The integration worktree and every squad worktree belong to one Git repository.
-Each squad owns its tmux sessions, role worktrees, handoff daemon, and
+Each squad owns its herdr workspace, role worktrees, handoff daemon, and
 `.swarmforge` state. The platoon directory is the integration worktree and
 parent control plane. The platoon owns the single aggregate dashboard.
 
@@ -148,7 +148,7 @@ and validated, including:
 - Recording and revising the system plan.
 - Applying approval, rejection, retry, and delete transitions.
 - Creating, configuring, starting, inspecting, and stopping squads.
-- Generating squad-prefixed worktree, branch, tmux, and runtime identities.
+- Generating squad-prefixed worktree, branch, herdr, and runtime identities.
 - Assigning approved component tasks.
 - Reporting squad status and attention items.
 - Routing operator actions to the owning squad.
@@ -375,7 +375,7 @@ is an independent integration gate, not a replacement for squad verification.
 ### Recovery And Dashboard
 
 Platoon state is durable. After the platoon or Lieutenant process restarts, the
-tooling automatically reconciles registered squad directories, branches, tmux
+tooling automatically reconciles registered squad directories, branches, herdr
 sessions, daemons, and runtime state, and resumes work that had been running.
 Conditions it cannot repair are reported for intervention.
 

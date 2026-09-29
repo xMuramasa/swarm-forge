@@ -141,10 +141,10 @@ The directory where `get-swarm-forge` is run is the **forge**. It holds:
 - `projects/` — one subdirectory per project
 - host scripts from `main` (`swarm`, `swarmforge/scripts`, shared
   constitution articles)
-- forge `.swarmforge/` — dashboard URL, lieutenant session, host tmux
-  socket
+- forge `.swarmforge/` — dashboard URL, lieutenant agent, host herdr
+  workspace id
 
-`./swarm` starts the **host** only: dashboard, lieutenant, host tmux.
+`./swarm` starts the **host** only: dashboard, lieutenant, host herdr workspace.
 It does not start any project agents.
 
 A project runtime is separate: that project's `swarmforge.conf` roles,
@@ -186,7 +186,7 @@ history, `.swarmforge/`, and the project's `swarmforge.conf`.
 **Open** starts that project's agents and `handoffd` from leftover
 sessions and logs. It does not create a new project.
 
-**Close** runs that project's cleanup (tmux, `handoffd`, agents) and
+**Close** runs that project's cleanup (herdr workspace, `handoffd`, agents) and
 leaves the directory.
 
 ### 4. Host dashboard API
@@ -225,7 +225,7 @@ Empty forge: no bands, Attention empty, chat still to the lieutenant.
 
 ### 6. Lieutenant
 
-Add a host lieutenant: prompt on `main`, one tmux session in the forge,
+Add a host lieutenant: prompt on `main`, one herdr agent in the forge,
 not a pack window. Startup launches it with the host. Chat injects to
 that pane and shows the reply, same machinery as today's master chat,
 aimed at the lieutenant. Close Project does not kill the lieutenant.

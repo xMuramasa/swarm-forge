@@ -2,19 +2,19 @@
 
 ## Goal
 
-Replace direct agent access to the tmux socket with a daemon-owned file transport.
-Agents should not send tmux commands, manage socket permissions, or maintain a
+Replace direct agent-to-agent messaging with a daemon-owned file transport.
+Agents should not prompt each other, drive the terminal multiplexer, or maintain a
 separate logbook. Agents should create small, validated handoff requests; the
 daemon should deliver them through durable inbox files and send only wake-up
-notifications through tmux.
+notifications through herdr.
 
 ## Summary
 
-The swarm startup script starts a handoff daemon alongside the tmux session. The
-daemon has direct access to the tmux socket and watches each agent worktree for
+The swarm startup script starts a handoff daemon alongside the herdr agents. The
+daemon prompts them through the herdr CLI and watches each agent worktree for
 outbound handoff files. When an outbound handoff appears, the daemon validates
 delivery targets, copies the handoff into each recipient inbox, sends each
-recipient a generic tmux wake-up message, and moves the original outbound file
+recipient a generic herdr wake-up prompt, and moves the original outbound file
 to `sent` or `failed`.
 
 The recipient inbox is the task queue. Agents use helper scripts to accept and
@@ -345,15 +345,16 @@ Responsibilities:
 - Process only complete `.handoff` files, never files in `outbox/tmp/`.
 - Copy each handoff to every recipient `inbox/new/`.
 - Add `recipient` and `enqueued_at` to each recipient copy.
-- Send a generic tmux wake-up message to each recipient.
+- Send a generic herdr wake-up prompt to each recipient. A refused wake-up (agent
+  blocked or gone) is logged, not fatal: the handoff is already in the inbox.
 - Move the original outbox file to `sent/` after successful delivery.
 - Move malformed or undeliverable files to `failed/` with useful diagnostics.
 - Avoid duplicate delivery when retrying after interruption.
 
-The tmux message should not name the delivered file. It should avoid biasing the
+The wake-up prompt should not name the delivered file. It should avoid biasing the
 recipient toward one file and should force queue-order processing.
 
-Example tmux wake-up:
+Example wake-up:
 
 ```text
 You have new handoff mail. If idle, run ready_for_next.sh.
@@ -498,7 +499,7 @@ Prompts should instruct agents to follow this loop:
 5. If it prints `BATCH: <path>`, treat each printed `BATCH_ITEM` as part of the
    current batch in helper-delivered order.
 6. Use only the task information printed by the helper scripts.
-7. If a tmux wake-up arrives while already working on a task, ignore it.
+7. If a wake-up arrives while already working on a task, ignore it.
 8. When the task or batch is fully complete, run `done_with_current.sh`.
 9. Treat `note` handoffs as tasks too; after reading or acting on a note, run
    `done_with_current.sh` before accepting any other handoff.
@@ -548,7 +549,7 @@ The swarm launcher should own the daemon lifecycle.
 
 Startup:
 
-- Start the daemon after creating or discovering the tmux session.
+- Start the daemon after creating or discovering the herdr agents.
 - Write daemon runtime files under `.swarmforge/daemon/`.
 
 Runtime files:
@@ -593,7 +594,7 @@ The current daemon-backed protocol uses these helper scripts:
 - `done_with_current_batch.sh` completes one current batch.
 - `handoffd` delivers queued outbox files and sends generic wake-ups.
 
-Agents should not use direct tmux notifications, long handoff bodies, logbooks,
+Agents should not use direct herdr notifications, long handoff bodies, logbooks,
 or the removed send/receive/complete/resend wrapper scripts.
 
 ## Finalized Decisions
