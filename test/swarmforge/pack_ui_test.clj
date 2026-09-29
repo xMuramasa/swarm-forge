@@ -973,6 +973,33 @@
     (is (every? #(= "no_session" (:state %)) wif))
     (is (every? #(= 0 (:activity %)) wif))))
 
+(deftest pack-web-marks-a-blocked-agent-as-blocked
+  ;; Given herdr reports coder as blocked and specifier as idle
+  ;; When pack_web --test-state
+  ;; Then coder's row is blocked, and blocked wins over live work
+  (let [root (tmp-dir)
+        roles ["specifier" "coder"]]
+    (setup-pack! root roles)
+    (put-in-process! root roles "coder" {:from "specifier" :task "cave-walk"})
+    (start-herdr! root roles)
+    (fake-herdr/set-status! root "coder" "blocked")
+    (let [by-role (into {} (map (juxt :role identity) (:work_in_flight (web-state root))))]
+      (is (= "idle" (:state (get by-role "specifier"))))
+      (is (= "blocked" (:state (get by-role "coder")))))))
+
+(deftest inject-flattens-multi-line-text-into-one-prompt
+  ;; Given operator text with line breaks
+  ;; When it is injected into the master
+  ;; Then the agent gets one single-line prompt (multi-line text arrives as an unanswered paste)
+  (let [root (tmp-dir)
+        argv-file (str (fs/path root "herdr.argv"))]
+    (write-file
+     (fs/path root ".swarmforge/roles.tsv")
+     (str "specifier\tmaster\t" root "\tsf-specifier\tSpecifier\tcodex\ttask\n"))
+    (pack-web root false "--test-inject-argv" (str root) argv-file "first\nsecond\n\nthird")
+    (is (= [["herdr" "agent" "prompt" "sf-specifier" "first second third"]]
+           (read-argv argv-file)))))
+
 (deftest pack-web-lists-in-process-work-in-flight
   ;; Given in_process handoff for coder task cave-walk
   ;; When pack_web --test-state

@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # Fake herdr for tests. State lives in $FAKE_HERDR_DIR:
 #   agents/<name>   exists => that agent is alive; its content is what `agent read` prints
+#   status/<name>   the agent's status for `agent get` (default idle)
 #   calls.log       every invocation's arguments, one per line
 #   prompts.log     "<name><TAB><text>" per `agent prompt`
 #   closed.log      the workspace id of each `workspace close`
@@ -20,7 +21,8 @@ next_pane() {
 case "$1 $2" in
   "agent get")
     [ -f "$d/agents/$3" ] || missing "$3"
-    printf '{"result":{"type":"agent_info","agent":{"agent_status":"idle"}}}\n' ;;
+    status=$(cat "$d/status/$3" 2>/dev/null || echo idle)
+    printf '{"result":{"type":"agent_info","agent":{"agent_status":"%s"}}}\n' "$status" ;;
   "agent read")
     [ -f "$d/agents/$3" ] || missing "$3"
     cat "$d/agents/$3" ;;

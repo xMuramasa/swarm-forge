@@ -509,12 +509,15 @@
 (defn in-process-dir [worktree]
   (fs/path worktree ".swarmforge" "handoffs" "inbox" "in_process"))
 
-(defn session-alive? [session]
-  (boolean (and session (herdr/alive? session))))
+(defn session-status
+  "herdr's status for the role's agent (idle, working, blocked, ...), nil when it is gone."
+  [session]
+  (when session (herdr/status session)))
 
-(defn role-queue-state [alive? busy?]
+(defn role-queue-state [alive? busy? blocked?]
   (cond
     (not alive?) "no_session"
+    blocked? "blocked"
     busy? "live"
     :else "idle"))
 
@@ -569,12 +572,12 @@
 (defn cards-in-lane [all-tasks lane]
   (filterv #(= lane (:lane %)) all-tasks))
 
-(defn queue-row [role names batch-names busy? alive? activity updated]
+(defn queue-row [role names batch-names busy? alive? blocked? activity updated]
   {:task (or (first names) "")
    :tasks (vec names)
    :batch_tasks (vec batch-names)
    :role role
-   :state (role-queue-state alive? busy?)
+   :state (role-queue-state alive? busy? blocked?)
    :updated_at (or updated "")
    :activity activity})
 
@@ -606,11 +609,12 @@
         cards (cards-in-lane all-tasks role)
         card (first cards)
         busy? (boolean (or path card))
-        alive? (session-alive? (session-name row))
+        status (session-status (session-name row))
+        alive? (some? status)
         text (live-pane-text root role)
         names (work-task-names files cards)
         batch-names (in-process-batch-task-names row)]
-    (queue-row role names batch-names busy? alive?
+    (queue-row role names batch-names busy? alive? (= "blocked" status)
                (role-heat root role (or alive? (some? *pane-text*)) text (backend-name row))
                (or (:updated_at from-file) (:updated_at card) ""))))
 

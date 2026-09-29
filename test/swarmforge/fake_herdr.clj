@@ -29,6 +29,12 @@
   (doseq [name names]
     (spit (str (fs/path (state-dir dir) "agents" name)) (or text ""))))
 
+(defn set-status!
+  "Make `agent get` report `status` (idle, working, blocked, ...) for an agent."
+  [dir name status]
+  (fs/create-dirs (fs/path (state-dir dir) "status"))
+  (spit (str (fs/path (state-dir dir) "status" name)) status))
+
 (defn- read-log [dir file]
   (let [path (fs/path (state-dir dir) file)]
     (if (fs/exists? path)

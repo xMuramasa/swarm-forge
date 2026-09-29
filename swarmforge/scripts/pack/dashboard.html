@@ -92,6 +92,7 @@ header.top h1{margin:0;font-size:15px}.meta{color:var(--muted);font-size:12px}.m
 .st-ico{display:inline-block;width:10px;height:10px;vertical-align:middle;border-radius:50%;background:#c5cbc2}
 .st-ico.dot-green{background:var(--green)}
 .st-ico.dot-yellow{background:#d4a017}
+.st-ico.dot-red{background:#c0392b}
 .wif-therm{display:inline-flex;align-items:center;gap:1px;margin-left:4px;vertical-align:middle}
 .wif-therm .bar{width:2px;height:8px;border-radius:1px;background:#c5cbc2}
 .wif-therm[data-heat="1"] .bar:nth-child(-n+1),
@@ -154,6 +155,7 @@ header.top h1{margin:0;font-size:15px}.meta{color:var(--muted);font-size:12px}.m
     <div class="tag">Attention</div>
     <div id="attention-rows">
       <div id="attention-approvals"></div>
+      <div id="attention-blocked"></div>
       <div id="attention-clarifications"></div>
     </div>
   </div>
@@ -453,6 +455,9 @@ function stateIcon(state) {
   if (state === "live") {
     ico.className = "st-ico dot-green";
     ico.title = "live";
+  } else if (state === "blocked") {
+    ico.className = "st-ico dot-red";
+    ico.title = "waiting for input in herdr";
   } else if (state === "idle") {
     ico.className = "st-ico dot-yellow";
     ico.title = "idle";
@@ -995,9 +1000,22 @@ function renderClarifications(items) {
   });
 }
 
+function renderBlocked(rows) {
+  const box = $("attention-blocked");
+  box.replaceChildren();
+  (rows || []).filter((row) => row.state === "blocked").forEach((row) => {
+    const div = document.createElement("div");
+    div.className = "att-row";
+    div.dataset.blockedRole = row.role || "";
+    div.textContent = (row.project ? row.project + " " : "") + row.role + " is waiting for input in herdr.";
+    box.appendChild(div);
+  });
+}
+
 function renderAttention(data) {
   chimeNewAttention(data);
   renderApprovals(data.approvals);
+  renderBlocked(data.work_in_flight);
   renderClarifications(data.clarifications);
 }
 

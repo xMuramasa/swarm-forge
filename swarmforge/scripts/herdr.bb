@@ -136,11 +136,14 @@
   (spit (str file) (str (pr-str (vec argv)) "\n") :append true))
 
 (defn prompt!
-  "Submit `text` to the agent as if typed. Throws when herdr refuses (agent gone or blocked)."
+  "Submit `text` to the agent as if typed. Throws when herdr refuses (agent gone or blocked).
+   Multi-line text is joined into one line: herdr sends it as a paste, and Claude then
+   treats it as pasted content with no request instead of answering it."
   [name text]
-  (if-let [file (stub)]
-    (record-argv! file ["herdr" "agent" "prompt" name text])
-    (cli! "agent" "prompt" name text)))
+  (let [text (one-line text)]
+    (if-let [file (stub)]
+      (record-argv! file ["herdr" "agent" "prompt" name text])
+      (cli! "agent" "prompt" name text))))
 
 (defn read-text
   "Recent terminal text of the agent, or nil."

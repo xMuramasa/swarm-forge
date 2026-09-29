@@ -172,6 +172,22 @@ test.describe("pack dashboard", () => {
     );
   });
 
+  test("Attention lists an agent that is blocked in herdr", async ({ page }) => {
+    await page.route("**/api/state", async (route) => {
+      const response = await route.fetch();
+      const data = await response.json();
+      data.work_in_flight = (data.work_in_flight || []).map((row) =>
+        row.role === "coder" ? { ...row, state: "blocked" } : row
+      );
+      await route.fulfill({ response, json: data });
+    });
+    await page.goto(handle.url);
+    await expect(page.locator("#attention-blocked .att-row")).toContainText(
+      "coder is waiting for input in herdr"
+    );
+    await expect(page.locator("#attention-blocked .att-row")).toHaveCount(1);
+  });
+
   test("Approve is disabled when a document has comments", async ({ page }) => {
     writeFile(
       path.join(handle.root, "projects/htw/.swarmforge/handoffs/pending_approval/50_hello.reviews.json"),
