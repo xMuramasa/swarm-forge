@@ -1052,3 +1052,113 @@
         (fs/delete-tree host)
         (fs/delete-tree base)
         (fs/delete-tree packs)))))
+
+(defn account-fixture
+  "Two account dirs and a registry file. Returns the dirs and the env that points at the registry."
+  [root]
+  (let [personal (fs/create-dirs (fs/path root "accounts/personal-claude"))
+        codex (fs/create-dirs (fs/path root "accounts/personal-codex"))
+        work (fs/create-dirs (fs/path root "accounts/work-claude"))
+        registry (fs/path root "accounts.conf")]
+    (write-file registry (str "# name and one dir per backend\n"
+                              "account personal claude=" personal " codex=" codex "\n"
+                              "account work claude=" work "\n"))
+    {:personal (str personal) :codex (str codex) :work (str work)
+     :env {"SWARMFORGE_ACCOUNTS_FILE" (str registry)}}))
+
+(deftest project-conf-selects-the-billing-account
+  ;; Given a conf with `account personal` and a registry that defines it
+  ;; When --test-parse
+  ;; Then the project runs on the personal account
+  (let [root (tmp-dir)
+        {:keys [env]} (account-fixture root)]
+    (try
+      (write-pack-conf! root "account personal\nwindow coder claude master\n")
+      (let [out (:out (run {:dir root :env env} (script "swarmforge.bb") "--test-parse" (str root)))]
+        (is (str/includes? out "account personal")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest swarmforge-account-env-overrides-the-conf
+  (let [root (tmp-dir)
+        {:keys [env]} (account-fixture root)]
+    (try
+      (write-pack-conf! root "account personal\nwindow coder claude master\n")
+      (let [out (:out (run {:dir root :env (assoc env "SWARMFORGE_ACCOUNT" "work")}
+                           (script "swarmforge.bb") "--test-parse" (str root)))]
+        (is (str/includes? out "account work"))
+        (is (not (str/includes? out "account personal"))))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest account-sets-each-backends-config-dir-for-the-agent
+  ;; Given the personal account with claude and codex dirs
+  ;; When the launch spec is built
+  ;; Then claude gets CLAUDE_CONFIG_DIR and codex gets CODEX_HOME; no account sets neither
+  (let [root (tmp-dir)
+        {:keys [env personal codex]} (account-fixture root)
+        spec (fn [agent extra-env]
+               (:out (run {:dir root :env (merge env extra-env)}
+                          (script "swarmforge.bb") "--test-launch-command" (str root) agent)))]
+    (try
+      (is (str/includes? (spec "claude" {"SWARMFORGE_ACCOUNT" "personal"})
+                         (str "CLAUDE_CONFIG_DIR=" personal)))
+      (is (str/includes? (spec "codex" {"SWARMFORGE_ACCOUNT" "personal"})
+                         (str "CODEX_HOME=" codex)))
+      (is (not (str/includes? (spec "claude" {}) "CLAUDE_CONFIG_DIR")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest account-problems-stop-the-launch-with-a-reason
+  (let [root (tmp-dir)
+        {:keys [env work]} (account-fixture root)
+        parse (fn [conf extra-env]
+                (write-pack-conf! root conf)
+                (run {:dir root :ok? false :env (merge env extra-env)}
+                     (script "swarmforge.bb") "--test-parse" (str root)))]
+    (try
+      (let [result (parse "account nobody\nwindow coder claude master\n" {})]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "Unknown account 'nobody'")))
+      (let [result (parse "account work\nwindow coder codex master\n" {})]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "has no codex directory")))
+      (fs/delete-tree work)
+      (let [result (parse "account work\nwindow coder claude master\n" {})]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "does not exist")))
+      (let [result (parse "account work\naccount work\nwindow coder claude master\n" {})]
+        (is (= 1 (:exit result)))
+        (is (str/includes? (:err result) "Duplicate account line")))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest account-reaches-every-role-pane-through-herdr
+  ;; Given a two-role project on the personal account
+  ;; When the launcher opens the panes
+  ;; Then the workspace and the extra tab are both created with CLAUDE_CONFIG_DIR
+  (let [root (tmp-dir)
+        {:keys [env personal]} (account-fixture root)]
+    (try
+      (write-pack-conf! root "account personal\nwindow coder claude master\nwindow cleaner claude cleaner\n")
+      (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
+      (run {:dir root :env env} (script "swarmforge.bb") "--test-launch-roles" (str root))
+      (let [calls (fake-herdr/calls root)
+            opens (filter #(re-find #"^(workspace|tab) create" %) calls)]
+        (is (= 2 (count opens)))
+        (is (every? #(str/includes? % (str "--env CLAUDE_CONFIG_DIR=" personal)) opens)))
+      (finally
+        (fs/delete-tree root)))))
+
+(deftest codex-trust-is-written-into-the-account-home
+  (let [root (tmp-dir)
+        home (fs/create-temp-dir {:prefix "codex-account."})
+        wt (str (fs/absolutize root))]
+    (try
+      (run {:dir root :env {"HOME" (str root)}} (script "swarmforge.bb")
+           "--test-ensure-codex-trust" wt (str home))
+      (is (str/includes? (slurp (str (fs/path home "config.toml")))
+                         (str "[projects." (pr-str wt) "]")))
+      (finally
+        (fs/delete-tree root)
+        (fs/delete-tree home)))))

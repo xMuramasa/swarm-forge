@@ -85,6 +85,31 @@ lieutenant, and dashboard. `project-manager` also downloads the three pack
 branches into `packs/`; `lieutenant` carries its one template under
 `.swarmforge/project-pack/`.
 
+## Accounts
+
+A project runs on one billing account, chosen per project rather than per role.
+Accounts live in `~/.config/swarmforge/accounts.conf`, one line each, naming
+the config directory of every backend that account uses:
+
+```text
+account personal claude=~/.claude-personal
+account work     claude=~/.claude codex=~/.codex
+```
+
+The project picks one with a line in `swarmforge/swarmforge.conf`:
+
+```text
+account personal
+```
+
+`SWARMFORGE_ACCOUNT=work ./swarm` overrides it for one run. Every agent in the
+project starts with that account's directory (`CLAUDE_CONFIG_DIR` for Claude,
+`CODEX_HOME` for Codex), and Codex trust is recorded there. Startup stops with
+a reason if the account is unknown, lacks a directory for a backend a role
+uses, or the directory does not exist (log in there once first). With no
+account selected, agents inherit the environment of the herdr pane, which is
+usually your default account.
+
 ## Configuration contract
 
 Every running project has a `swarmforge/swarmforge.conf`. For the fixed packs,

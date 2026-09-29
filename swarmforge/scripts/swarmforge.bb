@@ -156,6 +156,71 @@
     (reject-if (not= 1 (count masters))
                "Config must name exactly one master worktree")))
 
+(def account-env-vars
+  "The environment variable that selects a backend's account (config directory)."
+  {"claude" "CLAUDE_CONFIG_DIR"
+   "codex" "CODEX_HOME"})
+
+(defn expand-home [path]
+  (if (str/starts-with? path "~")
+    (str (System/getProperty "user.home") (subs path 1))
+    path))
+
+(defn accounts-file []
+  (or (not-empty (System/getenv "SWARMFORGE_ACCOUNTS_FILE"))
+      (str (fs/path (System/getProperty "user.home") ".config" "swarmforge" "accounts.conf"))))
+
+(defn parse-accounts
+  "`account <name> <backend>=<dir> ...` lines -> {name {backend dir}}."
+  [text]
+  (into {}
+        (for [raw (str/split-lines text)
+              :let [line (str/trim raw)]
+              :when (not (skip-config-line? line))
+              :let [[directive name & pairs] (str/split line #"\s+")]]
+          (do
+            (reject-if (or (not= directive "account") (nil? name))
+                       (str "Invalid line in " (accounts-file) ": " line))
+            [name (into {}
+                        (for [pair pairs
+                              :let [[backend dir] (str/split pair #"=" 2)]]
+                          (do
+                            (reject-if (or (str/blank? backend) (str/blank? dir))
+                                       (str "Invalid account entry '" pair "' in " (accounts-file)
+                                            "; expected <backend>=<dir>"))
+                            [backend (expand-home dir)])))]))))
+
+(defn resolve-account
+  "The project's billing account, chosen by SWARMFORGE_ACCOUNT or an `account <name>` line in
+   the conf. Adds :account {:name :dirs}; without a choice the agents inherit their environment."
+  [ctx]
+  (if-let [name (or (not-empty (System/getenv "SWARMFORGE_ACCOUNT")) (:account-name ctx))]
+    (let [file (accounts-file)
+          _ (reject-if (not (fs/regular-file? file))
+                       (str "Account '" name "' is selected but " file " does not exist."))
+          dirs (get (parse-accounts (slurp file)) name)]
+      (reject-if (nil? dirs) (str "Unknown account '" name "' in " file))
+      (assoc ctx :account {:name name :dirs dirs}))
+    ctx))
+
+(defn check-account-dirs!
+  "Every claude or codex role needs its account directory, already logged in."
+  [ctx]
+  (when-let [{:keys [name dirs]} (:account ctx)]
+    (doseq [agent (distinct (filter account-env-vars (map :agent (:roles ctx))))]
+      (let [dir (get dirs agent)]
+        (reject-if (nil? dir)
+                   (str "Account '" name "' has no " agent " directory, but a role uses " agent "."))
+        (reject-if (not (fs/directory? dir))
+                   (str "Account '" name "' " agent " directory " dir
+                        " does not exist. Log in once with " (account-env-vars agent) "=" dir " " agent "."))))))
+
+(defn parse-account-line [line line-no]
+  (let [fields (str/split line #"\s+")]
+    (reject-if (or (not= 2 (count fields)) (not (re-matches #"[A-Za-z0-9_-]+" (second fields))))
+               (str "Invalid account line " line-no ": " line))
+    (second fields)))
+
 (defn parse-config [ctx]
   (when-not (fs/exists? (:config-file ctx))
     (config-fail! (str "Config not found at " (:config-file ctx))))
@@ -164,23 +229,32 @@
   (loop [lines (map-indexed vector (str/split-lines (slurp (str (:config-file ctx)))))
          rows []
          roles #{}
-         worktrees #{}]
+         worktrees #{}
+         account nil]
     (if-let [[line-index raw-line] (first lines)]
       (let [line-no (inc line-index)
             line (str/trim raw-line)]
-        (if (skip-config-line? line)
-          (recur (next lines) rows roles worktrees)
+        (cond
+          (skip-config-line? line)
+          (recur (next lines) rows roles worktrees account)
+
+          (str/starts-with? line "account ")
+          (do (reject-if account (str "Duplicate account line " line-no))
+              (recur (next lines) rows roles worktrees (parse-account-line line line-no)))
+
+          :else
           (let [row (parse-window-line ctx line-no line roles worktrees)
                 worktree (:worktree-name row)]
             (recur (next lines)
                    (conj rows row)
                    (conj roles (:role row))
-                   (cond-> worktrees (not (special-worktree? worktree)) (conj worktree))))))
+                   (cond-> worktrees (not (special-worktree? worktree)) (conj worktree))
+                   account))))
       (do
         (reject-if (empty? rows)
                    (str "No windows defined in " (:config-file ctx)))
         (require-master-worktree! rows)
-        (assoc ctx :roles rows)))))
+        (assoc ctx :roles rows :account-name account)))))
 
 (defn write-sessions-file! [ctx]
   (spit (str (:sessions-file ctx))
@@ -451,6 +525,11 @@
                       ["--minimal" "--rules" prompt]
                       (when initial-prompt? ["--verbatim" prompt]))))))
 
+(defn account-env [ctx agent]
+  (when-let [dir (get-in ctx [:account :dirs agent])]
+    (when-let [var (account-env-vars agent)]
+      {var dir})))
+
 (defn launch-spec
   "What to run for a role: `env` is set on the role's pane shell; `argv` goes to
    `herdr agent start --kind <agent>`."
@@ -470,7 +549,7 @@
        :prompt prompt
        :prompt-file prompt-file
        :path-dirs [(str tool-bin) (str role-script-dir)]
-       :env (cond-> {"SWARMFORGE_ROLE" role}
+       :env (cond-> (merge {"SWARMFORGE_ROLE" role} (account-env ctx agent))
               (not (str/blank? (alt-screen-env agent row)))
               (assoc "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN" "1"))
        :argv (agent-argv row (:display-name row) role-worktree prompt-file prompt initial-prompt?)})))
@@ -488,9 +567,9 @@
     (str/ends-with? text "\n") text
     :else (str text "\n")))
 
-(defn ensure-codex-trust! [dir]
+(defn ensure-codex-trust! [dir & [account-home]]
   (when-not (str/blank? (str dir))
-    (let [home (codex-home)
+    (let [home (or account-home (codex-home))
           cfg (fs/path home "config.toml")
           header (project-table-header dir)
           text (if (fs/exists? cfg) (slurp (str cfg)) "")]
@@ -502,7 +581,7 @@
 
 (defn launch-role! [ctx row]
   (when (= "codex" (:agent row))
-    (ensure-codex-trust! (:worktree-path row)))
+    (ensure-codex-trust! (:worktree-path row) (get-in ctx [:account :dirs "codex"])))
   (let [display (:display-name row)
         {:keys [agent env path-dirs argv]} (launch-spec ctx row)
         pane (herdr/open-pane! (:working-dir ctx) display (str (:worktree-path row)) env)
@@ -622,7 +701,9 @@
      :handoff-daemon-log (fs/path daemon-dir "handoffd.log")}))
 
 (defn prepare-ctx [ctx]
-  (parse-config ctx))
+  (let [ctx (-> ctx parse-config resolve-account)]
+    (check-account-dirs! ctx)
+    ctx))
 
 (defn visibility-label [row]
   (if (:visible? row) "visible" "invisible"))
@@ -635,6 +716,8 @@
                     (:receive-mode row) " " (:propagation row)
                     (when-let [extra (:extra-args row)] (str " " extra))
                     " " (visibility-label row))))
+    (when-let [account (:account ctx)]
+      (println "account" (:name account)))
     (print (slurp (str (:roles-file ctx))))
     (print (slurp (str (:sessions-file ctx))))))
 
@@ -659,6 +742,8 @@
   (println)
   (println (str green bold "SwarmForge is ready." reset))
   (println "Working directory:" (str (:working-dir ctx)))
+  (when-let [account (:account ctx)]
+    (println "Account:" (:name account)))
   (println "Sessions:")
   (doseq [row (:roles ctx)]
     (println (str "  " (:display-name row) ": " (:session row))))
@@ -743,7 +828,8 @@
   (check-dependency! "bb")
   (let [ctx (context root)
         row (lieutenant-row ctx)
-        ctx (assoc ctx :roles [row] :host? true)]
+        ctx (resolve-account (assoc ctx :roles [row] :host? true))]
+    (check-account-dirs! ctx)
     (when-not (fs/exists? (fs/path (:roles-dir ctx) "lieutenant.prompt"))
       (fail! (str red "Error:" reset " Missing lieutenant prompt at "
                   (fs/path (:roles-dir ctx) "lieutenant.prompt"))))
@@ -803,7 +889,7 @@
     (println (str/join " " (into [(str "kind=" agent) "--"](map #(if (= % prompt) "<prompt>" %) argv))))))
 
 (defn test-launch-command! [root agent & [extra-args]]
-  (let [ctx (context root)
+  (let [ctx (resolve-account (context root))
         row {:role "coder"
              :agent agent
              :session "sf-coder"
@@ -832,8 +918,8 @@
 (defn test-sleep-inhibitor-prefix! []
   (println (str/join " " (or (sleep-inhibitor-prefix) []))))
 
-(defn test-ensure-codex-trust! [dir]
-  (ensure-codex-trust! dir))
+(defn test-ensure-codex-trust! [dir & [home]]
+  (ensure-codex-trust! dir home))
 
 (defn test-reset-pack-web-state! [root]
   (let [ctx (context root)]
@@ -856,7 +942,7 @@
                                         (or (second args) (System/getProperty "user.dir")))
     "--test-install-hooks" (test-install-hooks! (second args))
     "--test-sleep-inhibitor-prefix" (test-sleep-inhibitor-prefix!)
-    "--test-ensure-codex-trust" (test-ensure-codex-trust! (second args))
+    "--test-ensure-codex-trust" (apply test-ensure-codex-trust! (rest args))
     "--test-reset-pack-web-state" (test-reset-pack-web-state! (second args))
     "--start-project" (run-project! (second args))
     "--stop-project" (run-stop-project! (second args))
