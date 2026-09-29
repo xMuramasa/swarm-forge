@@ -961,6 +961,41 @@
     (is (not (re-find #"--test-state\" \(test-state!" (slurp (script "pack_web.bb")))))
     (is (str/includes? (slurp (str (fs/path repo-root "test/swarmforge/pack_web_test.bb"))) "--test-state"))))
 
+(deftest get-swarm-forge-composes-mini-forge-from-main-and-the-pack
+  ;; Given main (runtime, shared articles) and a mini-forge pack tree
+  ;; When get-swarm-forge mini-forge runs in a project
+  ;; Then the project gets main's runtime and shared articles plus the pack's launcher, conf and roles
+  (let [project (tmp-dir)
+        base (tmp-dir)
+        pack (tmp-dir)]
+    (try
+      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
+        (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
+      (doseq [article ["engineering" "workflow" "handoffs"]]
+        (write-file (fs/path base "swarmforge/constitution/articles" (str article ".prompt"))
+                    (str "MAIN-" article "\n")))
+      (write-file (fs/path pack "swarm") "#!/bin/sh\necho pack-swarm\n")
+      (write-file (fs/path pack "swarmforge/swarmforge.conf") "window specifier claude master\n")
+      (write-file (fs/path pack "swarmforge/constitution.prompt") "PACK-CONSTITUTION\n")
+      (write-file (fs/path pack "swarmforge/roles/specifier.prompt") "specifier\n")
+      (write-file (fs/path pack "swarmforge/constitution/articles/project.prompt") "PACK-PROJECT\n")
+      (write-file (fs/path pack "swarmforge/constitution/articles/engineering.prompt") "PACK-STALE\n")
+      (let [result (run {:dir project
+                         :env {"SWARMFORGE_BASE_DIR" (str base)
+                               "SWARMFORGE_PACKS_DIR" (str pack)}}
+                        (str (fs/path repo-root "get-swarm-forge"))
+                        "mini-forge")]
+        (is (zero? (:exit result)) (:err result))
+        (is (fs/exists? (fs/path project "swarmforge/scripts/handoffd.bb")))
+        (is (= "MAIN-engineering\n" (slurp (str (fs/path project "swarmforge/constitution/articles/engineering.prompt")))))
+        (is (= "PACK-PROJECT\n" (slurp (str (fs/path project "swarmforge/constitution/articles/project.prompt")))))
+        (is (= "#!/bin/sh\necho pack-swarm\n" (slurp (str (fs/path project "swarm")))))
+        (is (fs/exists? (fs/path project "swarmforge/roles/specifier.prompt"))))
+      (finally
+        (fs/delete-tree project)
+        (fs/delete-tree base)
+        (fs/delete-tree pack)))))
+
 (deftest get-swarm-forge-copies-only-swarmforge-owned-paths
   (let [host (tmp-dir)
         base (tmp-dir)
@@ -993,7 +1028,8 @@
       (let [result (run {:dir host
                          :env {"SWARMFORGE_BASE_DIR" (str base)
                                "SWARMFORGE_PACKS_DIR" (str packs)}}
-                        (str (fs/path repo-root "get-swarm-forge")))]
+                        (str (fs/path repo-root "get-swarm-forge"))
+                        "project-manager")]
         (is (zero? (:exit result)) (:err result))
         (is (= "host-readme\n" (slurp (str (fs/path host "README.md")))))
         (is (= "{:paths [\"test\"]}\n" (slurp (str (fs/path host "bb.edn")))))

@@ -1,12 +1,12 @@
 #!/bin/zsh
 set -euo pipefail
 
-default_repo_url="https://github.com/unclebob/swarm-forge"
+default_repo_url="https://github.com/xMuramasa/swarm-forge"
 pack_names=(two-pack four-pack six-pack)
 
 usage() {
-  echo "usage: get-swarm-forge <two-pack|four-pack|six-pack|project-manager|lieutenant>" >&2
-  echo "  Packs (two-pack, four-pack, six-pack) compose into the current directory." >&2
+  echo "usage: get-swarm-forge <mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant>" >&2
+  echo "  Packs (mini-forge, two-pack, four-pack, six-pack) compose into the current directory." >&2
   echo "  project-manager and lieutenant are forges (projects/, dashboard, host lieutenant)." >&2
 }
 
@@ -22,7 +22,7 @@ fi
 
 product="$1"
 case "$product" in
-  two-pack|four-pack|six-pack|project-manager|lieutenant) ;;
+  mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant) ;;
   *)
     echo "get-swarm-forge: unknown product '$product'" >&2
     usage
@@ -207,7 +207,7 @@ host_from="$product"
 packs_src="${SWARMFORGE_PACKS_DIR:-}"
 main_dir="$tmp_dir/main"
 
-if [[ "$product" == two-pack || "$product" == four-pack || "$product" == six-pack ]]; then
+if [[ "$product" == mini-forge || "$product" == two-pack || "$product" == four-pack || "$product" == six-pack ]]; then
   if [[ -z "${SWARMFORGE_BASE_DIR:-}" ]]; then
     download_branch "main" "$main_dir"
     host_dir="$main_dir"
