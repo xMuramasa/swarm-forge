@@ -98,11 +98,18 @@
                     (range 6))
       (throw (ex-info (str "the shell in pane " pane " never became ready") {:pane pane})))))
 
+(defn one-line
+  "herdr rejects control characters (newline, tab) in agent arguments, so multi-line
+   text such as a role prompt is joined with single spaces."
+  [arg]
+  (str/replace (str arg) #"\s*[\r\n\t]+\s*" " "))
+
 (defn start-agent!
   "Start `kind` in `pane` and wait until it is ready for prompts.
    Returns the cli result; :error :code is agent_not_ready when it is parked on a dialog."
   [name kind pane args]
-  (apply cli "agent" "start" name "--kind" kind "--pane" pane "--timeout" 60000 "--" args))
+  (apply cli "agent" "start" name "--kind" kind "--pane" pane "--timeout" 60000 "--"
+         (map one-line args)))
 
 (defn close-workspace! [root]
   (when-let [ws (workspace-id root)]

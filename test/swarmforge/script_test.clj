@@ -187,9 +187,10 @@
                         (str "window coder claude master\n"
                              "window cleaner claude cleaner\n"))
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
-      (run {:dir root} (script "swarmforge.bb") "--test-launch-roles" (str root))
-      (let [calls (fake-herdr/calls root)
+      (let [launched (run {:dir root} (script "swarmforge.bb") "--test-launch-roles" (str root))
+            calls (fake-herdr/calls root)
             starts (filter #(str/starts-with? % "agent start") calls)]
+        (is (not (str/includes? (:out launched) "is not ready")))
         (is (= 1 (count (filter #(str/starts-with? % "workspace create") calls))))
         (is (= 1 (count (filter #(str/starts-with? % "tab create --workspace w1") calls))))
         (is (some #(and (str/starts-with? % "workspace create")

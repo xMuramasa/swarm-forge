@@ -29,6 +29,15 @@ case "$1 $2" in
     printf '%s\t%s\n' "$3" "$4" >> "$d/prompts.log"
     printf '{"result":{"type":"ok"}}\n' ;;
   "agent start")
+    # like the real herdr, refuse control characters in agent arguments
+    nl='
+'
+    tab=$(printf '\t')
+    case "$*" in
+      *"$nl"* | *"$tab"*)
+        printf '{"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"}}\n'
+        exit 1 ;;
+    esac
     : > "$d/agents/$3"
     printf '{"result":{"type":"agent_started"}}\n' ;;
   "workspace create")
