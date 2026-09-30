@@ -280,18 +280,17 @@
                          (:propagation row))))))
 
 (def required-helpers
-  ["handoff_lib.bb" "swarm_handoff.sh" "swarm_handoff.bb"
+  ["handoff_lib.bb" "handoff_lib.ts" "swarm_handoff.sh" "swarm_handoff.bb"
    "swarm_tool.sh" "swarm_tool.bb"
-   "commit-msg-hook.sh" "commit_msg_hook.bb"
-   "merge_and_process.sh" "merge_and_process.bb"
-   "ready_for_next.sh" "ready_for_next.bb"
-   "ready_for_next_guard.bb"
-   "done_with_current.sh" "done_with_current.bb"
-   "ready_for_next_task.sh" "ready_for_next_task.bb"
-   "done_with_current_task.sh" "done_with_current_task.bb"
-   "ready_for_next_batch.sh" "ready_for_next_batch.bb"
-   "done_with_current_batch.sh" "done_with_current_batch.bb"
-   "handoffd.bb" "stop_handoff_daemon.bb" "stop_handoff_daemon.sh"
+   "commit-msg-hook.sh" "commit_msg_hook.ts"
+   "merge_and_process.sh" "merge_and_process.ts"
+   "ready_for_next.sh" "ready_for_next.ts"
+   "done_with_current.sh" "done_with_current.ts"
+   "ready_for_next_task.sh" "ready_for_next_task.ts"
+   "done_with_current_task.sh" "done_with_current_task.ts"
+   "ready_for_next_batch.sh" "ready_for_next_batch.ts"
+   "done_with_current_batch.sh" "done_with_current_batch.ts"
+   "handoffd.bb" "stop_handoff_daemon.ts" "stop_handoff_daemon.sh"
    "swarmforge.sh" "swarmforge.bb"
    "pack_board.sh" "pack_board.bb"
    "swarmctl.sh" "swarmctl.ts"])
@@ -312,12 +311,12 @@
 (defn install-commit-msg-hook! [ctx]
   (let [dir (git-hooks-dir ctx)
         hook (fs/path dir "commit-msg")
-        bb (str (fs/absolutize (fs/path (:script-dir ctx) "commit_msg_hook.bb")))]
+        hook-script (str (fs/absolutize (fs/path (:script-dir ctx) "commit_msg_hook.ts")))]
     (fs/create-dirs dir)
     (spit (str hook)
           (str "#!/usr/bin/env zsh\n"
                "set -euo pipefail\n"
-               "exec bb " (sq bb) " \"$@\"\n"))
+               "exec bun " (sq hook-script) " \"$@\"\n"))
     (fs/set-posix-file-permissions hook "rwxr-xr-x")))
 
 (defn prepare-workspace! [ctx]
@@ -589,7 +588,7 @@
 
 (defn stop-handoff-daemon! [ctx]
   (process/sh {:continue true}
-              "bb" (str (fs/path (:script-dir ctx) "stop_handoff_daemon.bb"))
+              "bun" (str (fs/path (:script-dir ctx) "stop_handoff_daemon.ts"))
               (str (:working-dir ctx))))
 
 (defn uname []

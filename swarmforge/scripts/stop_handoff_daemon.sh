@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec bb "$SCRIPT_DIR/stop_handoff_daemon.bb" "$@"
+exec bun "$SCRIPT_DIR/stop_handoff_daemon.ts" "$@"

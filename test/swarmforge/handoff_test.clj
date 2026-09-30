@@ -413,7 +413,7 @@
         _ (write-file (fs/path root ".swarmforge" "roles.tsv")
                       (format "coder\tmaster\t%s\tsession\tCoder\tcodex\ttask\n" wt))]
     (run {:dir root} (script "pack_board.sh") "create" "--name" "HTW" "--lane" "coder" "--root" (str root))
-    (let [from-lib (run {:dir wt} (script "handoff_lib.bb") "project-root")
+    (let [from-lib (run {:dir wt} (script "handoff_lib.ts") "project-root")
           listed (run {:dir wt} (script "pack_board.sh") "list")]
       (is (= (str (fs/canonicalize root))
              (str (fs/canonicalize (str/trim (:out from-lib))))))
@@ -1009,7 +1009,7 @@
     (let [pid-file (fs/path root ".swarmforge/daemon/handoffd.pid")]
       (is (fs/exists? pid-file))
       (let [pid (str/trim (read-file pid-file))
-            stop (run {:dir root} (script "stop_handoff_daemon.bb") (str root))]
+            stop (run {:dir root} (script "stop_handoff_daemon.ts") (str root))]
         (is (= 0 (:exit stop)))
         (Thread/sleep 300)
         (is (not (fs/exists? pid-file)))
@@ -1166,7 +1166,7 @@
     (make-queued-handoff! wt "50_20260615T000001Z_000001_from_sender_to_receiver.handoff"
                           {:id "20260615T000001Z_000001_from_sender"
                            :task "task-inferred"})
-    (let [lib (run {:dir wt :ok? false} (script "handoff_lib.bb") "role")
+    (let [lib (run {:dir wt :ok? false} (script "handoff_lib.ts") "role")
           ready (run {:dir wt :ok? false} (script "ready_for_next.sh"))
           done (run {:dir wt :ok? false} (script "done_with_current.sh"))]
       (is (zero? (:exit lib)))

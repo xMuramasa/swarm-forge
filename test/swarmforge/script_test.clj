@@ -51,9 +51,9 @@
                        "task: task-alpha\n"
                        "\n"
                        "merge_and_process coder abcdef1234\n"))
-      (let [header (run {:dir root} (script "handoff_lib.bb") "header-field" "task.handoff" "task")
-            body (run {:dir root} (script "handoff_lib.bb") "body" "task.handoff")
-            task (run {:dir root} (script "handoff_lib.bb") "print-task" "task.handoff")]
+      (let [header (run {:dir root} (script "handoff_lib.ts") "header-field" "task.handoff" "task")
+            body (run {:dir root} (script "handoff_lib.ts") "body" "task.handoff")
+            task (run {:dir root} (script "handoff_lib.ts") "print-task" "task.handoff")]
         (is (str/includes? (:out header) "task-alpha"))
         (is (str/includes? (:out body) "merge_and_process coder abcdef1234"))
         (is (str/includes? (:out task) "TASK: task.handoff"))
@@ -77,13 +77,13 @@
                        "type: note\n"
                        "\n"
                        "payload\n"))
-      (run {:dir root} (script "handoff_lib.bb") "role-known" "cleaner")
-      (run {:dir root} (script "handoff_lib.bb") "set-header" ".swarmforge/handoffs/inbox/new/item.handoff" "dequeued_at" "2026-06-16T00:00:00Z")
-      (let [mode (run {:dir root} (script "handoff_lib.bb") "role-receive-mode" "cleaner")
-            worktree (run {:dir root} (script "handoff_lib.bb") "role-worktree-name" "cleaner")
-            dequeued (run {:dir root} (script "handoff_lib.bb") "header-field" ".swarmforge/handoffs/inbox/new/item.handoff" "dequeued_at")
-            seq-1 (run {:dir root} (script "handoff_lib.bb") "next-sequence")
-            seq-2 (run {:dir root} (script "handoff_lib.bb") "next-sequence")]
+      (run {:dir root} (script "handoff_lib.ts") "role-known" "cleaner")
+      (run {:dir root} (script "handoff_lib.ts") "set-header" ".swarmforge/handoffs/inbox/new/item.handoff" "dequeued_at" "2026-06-16T00:00:00Z")
+      (let [mode (run {:dir root} (script "handoff_lib.ts") "role-receive-mode" "cleaner")
+            worktree (run {:dir root} (script "handoff_lib.ts") "role-worktree-name" "cleaner")
+            dequeued (run {:dir root} (script "handoff_lib.ts") "header-field" ".swarmforge/handoffs/inbox/new/item.handoff" "dequeued_at")
+            seq-1 (run {:dir root} (script "handoff_lib.ts") "next-sequence")
+            seq-2 (run {:dir root} (script "handoff_lib.ts") "next-sequence")]
         (is (str/includes? (:out mode) "batch"))
         (is (str/includes? (:out worktree) "cleaner"))
         (is (str/includes? (:out dequeued) "2026-06-16T00:00:00Z"))
@@ -336,9 +336,9 @@
                   (str "coder\tmaster\t" root "\tsession\tCoder\tcodex\ttask\n"
                        "cleaner\tcleaner\t" root "\tsession\tCleaner\tcodex\tbatch\tback-one\n"
                        "architect\tarchitect\t" root "\tsession\tArchitect\tcodex\tbatch\tback-all\n"))
-      (let [coder (run {:dir root} (script "handoff_lib.bb") "role-propagation" "coder")
-            cleaner (run {:dir root} (script "handoff_lib.bb") "role-propagation" "cleaner")
-            architect (run {:dir root} (script "handoff_lib.bb") "role-propagation" "architect")]
+      (let [coder (run {:dir root} (script "handoff_lib.ts") "role-propagation" "coder")
+            cleaner (run {:dir root} (script "handoff_lib.ts") "role-propagation" "cleaner")
+            architect (run {:dir root} (script "handoff_lib.ts") "role-propagation" "architect")]
         (is (str/includes? (:out coder) "forward-only"))
         (is (str/includes? (:out cleaner) "back-one"))
         (is (str/includes? (:out architect) "back-all")))
@@ -869,7 +869,7 @@
                    ".swarmforge/handoffs/inbox/completed"]]
         (fs/create-dirs (fs/path root dir)))
       (let [mode (run {:dir root :env {"SWARMFORGE_ROLE" "sender"}}
-                      (script "handoff_lib.bb") "role-receive-mode" "sender")
+                      (script "handoff_lib.ts") "role-receive-mode" "sender")
             ready (run {:dir root :env {"SWARMFORGE_ROLE" "sender"} :ok? false}
                        (script "ready_for_next.sh"))]
         (is (str/includes? (:out mode) "task"))
@@ -911,15 +911,15 @@
 
 (deftest finish-done-logs-archive-throw-and-still-announces
   (let [root (tmp-dir)
-        lib (fs/path root "handoff_lib.bb")]
+        lib (fs/path root "handoff_lib.ts")]
     (try
       (init-repo! root)
       (write-file (fs/path root ".swarmforge/roles.tsv")
                   (format "sender\tmaster\t%s\tsession\tSender\tcodex\ttask\n" root))
       (fs/create-dirs (fs/path root ".swarmforge/handoffs/inbox/new"))
-      (fs/copy (script "handoff_lib.bb") lib)
+      (fs/copy (script "handoff_lib.ts") lib)
       (let [result (run {:dir root :env {"SWARMFORGE_ROLE" "sender"} :ok? false}
-                        "bb" (str lib) "finish-done")]
+                        "bun" (str lib) "finish-done")]
         (is (zero? (:exit result)))
         (is (re-find #"MAIL_WAITING|NO_TASK" (:out result)))
         (is (str/includes? (str (:err result)) "archive failed"))

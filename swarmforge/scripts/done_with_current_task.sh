@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec bb "$SCRIPT_DIR/done_with_current_task.bb" "$@"
+exec bun "$SCRIPT_DIR/done_with_current_task.ts" "$@"

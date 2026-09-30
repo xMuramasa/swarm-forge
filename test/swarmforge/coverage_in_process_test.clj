@@ -2,25 +2,17 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [commit-msg-hook]
             [crap]
             [handoff-lib]
             [handoffd]
             [herdr]
-            [merge-and-process]
             [pack-board]
-            [ready-for-next-guard]
-            [stop-handoff-daemon]
             [swarm-handoff]
             [swarm-tool]
             [swarmforge]))
 
 (defn- tmp-dir []
   (fs/create-temp-dir {:prefix "swarmforge-in-process-test."}))
-
-(deftest commit-msg-hook-builds-bylines
-  (is (= "By specifier." (commit-msg-hook/byline "specifier")))
-  (is (= "hello\n\nBy coder.\n" (commit-msg-hook/append-byline "hello" "coder"))))
 
 (deftest herdr-agent-names-fit-herdr-rules
   (is (= "sf-my-project-qa" (herdr/agent-name "/x/My Project" "QA")))
@@ -101,14 +93,6 @@
         (is (re-find #"from: coder" (handoffd/render-message (:headers message) (:body message)))))
       (finally
         (fs/delete-tree root)))))
-
-(deftest merge-and-process-usage-text-names-the-script
-  (is (re-find #"merge_and_process" merge-and-process/usage-text)))
-
-(deftest ready-for-next-guard-formats-wait-message
-  (let [lines (ready-for-next-guard/wait-message ["/tmp/a.handoff"])]
-    (is (re-find #"WAITING_FOR_APPROVAL" (first lines)))
-    (is (re-find #"/tmp/a.handoff" (second lines)))))
 
 (deftest handoff-lib-rewrites-headers
   (is (= ["task: beta" "" "body"]
