@@ -177,10 +177,10 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest swarmforge-launch-gives-each-role-a-tab-and-starts-its-agent
+(deftest swarmforge-launch-gives-each-role-a-pane-and-starts-its-agent
   ;; Given a claude coder on master and a claude cleaner
   ;; When the launcher starts the roles against herdr
-  ;; Then one workspace holds a tab per role, and each agent is started by name in its own pane
+  ;; Then one workspace holds a pane per role, and each agent is started by name in its own pane
   (let [root (tmp-dir)]
     (try
       (write-pack-conf! root
@@ -192,10 +192,11 @@
             starts (filter #(str/starts-with? % "agent start") calls)]
         (is (not (str/includes? (:out launched) "is not ready")))
         (is (= 1 (count (filter #(str/starts-with? % "workspace create") calls))))
-        (is (= 1 (count (filter #(str/starts-with? % "tab create --workspace w1") calls))))
+        (is (empty? (filter #(str/starts-with? % "tab create") calls)))
+        (is (= 1 (count (filter #(str/starts-with? % "pane split w1:p1 --direction right --ratio 0.5") calls))))
         (is (some #(and (str/starts-with? % "workspace create")
                         (str/includes? % "--env SWARMFORGE_ROLE=coder")) calls))
-        (is (some #(and (str/starts-with? % "tab create")
+        (is (some #(and (str/starts-with? % "pane split")
                         (str/includes? % "--env SWARMFORGE_ROLE=cleaner")) calls))
         (is (some #(re-find #"^pane run w1:p1 export PATH='[^']*/\.swarmforge/bin':" %) calls))
         (is (some #(re-find #"^pane run w1:p2 export PATH='[^']*/\.swarmforge/bin':" %) calls))
@@ -1144,7 +1145,7 @@
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
       (run {:dir root :env env} (script "swarmforge.bb") "--test-launch-roles" (str root))
       (let [calls (fake-herdr/calls root)
-            opens (filter #(re-find #"^(workspace|tab) create" %) calls)]
+            opens (filter #(re-find #"^(workspace create|pane split)" %) calls)]
         (is (= 2 (count opens)))
         (is (every? #(str/includes? % (str "--env CLAUDE_CONFIG_DIR=" personal)) opens)))
       (finally

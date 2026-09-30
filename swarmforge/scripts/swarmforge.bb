@@ -579,12 +579,15 @@
               (str (ensure-newline text)
                    "\n" header "\ntrust_level = \"trusted\"\n"))))))
 
-(defn launch-role! [ctx row]
+(defn launch-role!
+  "Start `row`'s agent in the pane that `open-pane` (a fn of cwd and env) returns."
+  [ctx row open-pane]
   (when (= "codex" (:agent row))
     (ensure-codex-trust! (:worktree-path row) (get-in ctx [:account :dirs "codex"])))
   (let [display (:display-name row)
         {:keys [agent env path-dirs argv]} (launch-spec ctx row)
-        pane (herdr/open-pane! (:working-dir ctx) display (str (:worktree-path row)) env)
+        pane (open-pane (str (:worktree-path row)) env)
+        _ (herdr/label-pane! pane display)
         _ (herdr/prepend-path! pane path-dirs)
         result (herdr/start-agent! (:session row) agent pane argv)]
     (if (:ok? result)
@@ -755,8 +758,18 @@
 
 (defn launch-roles! [ctx]
   (println (str green "Starting agents..." reset))
-  (doseq [row (:roles ctx)]
-    (launch-role! ctx row)))
+  (let [rows (:roles ctx)
+        plan (herdr/grid-plan (count rows))
+        panes (atom [])]
+    (doseq [[i row] (map-indexed vector rows)]
+      (launch-role! ctx row
+                    (fn [cwd env]
+                      (let [pane (if (zero? i)
+                                   (herdr/open-workspace! (:working-dir ctx) cwd env)
+                                   (let [[from direction ratio] (nth plan (dec i))]
+                                     (herdr/split-pane! (nth @panes from) direction ratio cwd env)))]
+                        (swap! panes conj pane)
+                        pane))))))
 
 (defn boot-sessions! []
   (println (str cyan bold))

@@ -1,8 +1,8 @@
 #!/usr/bin/env bb
 
 ;; Thin wrapper over the herdr CLI. Every script that used to shell out to
-;; tmux goes through here. One herdr workspace per project, one tab per role,
-;; one herdr agent per role named sf-<project>-<role>.
+;; tmux goes through here. One herdr workspace per project holding every role as a
+;; pane in one tab, and one herdr agent per role named sf-<project>-<role>.
 
 (ns herdr
   (:require [babashka.fs :as fs]
@@ -67,21 +67,38 @@
 (defn env-args [env]
   (mapcat (fn [[k v]] ["--env" (str k "=" v)]) env))
 
-(defn open-pane!
-  "Give a role its own tab, its shell started with `env`. The first role creates the
-   project workspace. Env goes in at spawn: typing exports into a fresh pane races
-   the shell's startup. Returns the pane id."
-  [root label cwd env]
-  (if-let [ws (workspace-id root)]
-    (get-in (apply cli! "tab" "create" "--workspace" ws "--cwd" cwd "--label" label "--no-focus"
-                   (env-args env))
-            [:root_pane :pane_id])
-    (let [result (apply cli! "workspace" "create" "--cwd" cwd "--label" (project-slug root) "--no-focus"
-                        (env-args env))]
-      (fs/create-dirs (fs/parent (workspace-file root)))
-      (spit (str (workspace-file root)) (str (get-in result [:workspace :workspace_id]) "\n"))
-      (cli "tab" "rename" (get-in result [:tab :tab_id]) label)
-      (get-in result [:root_pane :pane_id]))))
+(defn grid-plan
+  "How to split panes into a grid for `n` roles: two rows, ceil(n/2) columns, the top row
+   filled first. One [from-index direction ratio] per pane after the first; `from-index` is
+   the pane to split and `ratio` the share the split pane keeps, so columns come out equal."
+  [n]
+  (let [cols (if (<= n 2) n (long (Math/ceil (/ n 2.0))))]
+    (vec (for [i (range 1 n)]
+           (if (< i cols)
+             [(dec i) "right" (/ 1.0 (- (inc cols) i))]
+             [(- i cols) "down" 0.5])))))
+
+(defn label-pane! [pane label]
+  (cli "pane" "rename" pane label))
+
+(defn open-workspace!
+  "Create the project workspace with its shell started with `env`. Env goes in at spawn:
+   typing exports into a fresh pane races the shell's startup. Returns the first pane id."
+  [root cwd env]
+  (let [result (apply cli! "workspace" "create" "--cwd" cwd "--label" (project-slug root) "--no-focus"
+                      (env-args env))]
+    (fs/create-dirs (fs/parent (workspace-file root)))
+    (spit (str (workspace-file root)) (str (get-in result [:workspace :workspace_id]) "\n"))
+    (cli "tab" "rename" (get-in result [:tab :tab_id]) "swarm")
+    (get-in result [:root_pane :pane_id])))
+
+(defn split-pane!
+  "Split `from` (`direction` right or down; `ratio` is the share `from` keeps) into a new pane
+   started with `env`. Returns the new pane id."
+  [from direction ratio cwd env]
+  (get-in (apply cli! "pane" "split" from "--direction" direction "--ratio" ratio
+                 "--cwd" cwd "--no-focus" (env-args env))
+          [:pane :pane_id]))
 
 (defn sq [value]
   (str "'" (str/replace (str value) #"'" "'\"'\"'") "'"))

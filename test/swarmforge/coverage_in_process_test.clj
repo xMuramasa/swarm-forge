@@ -30,6 +30,15 @@
     (is (re-matches #"[a-z][a-z0-9_-]{0,31}" name)))
   (is (thrown? Exception (herdr/agent-name "/x/p" (apply str (repeat 40 "r"))))))
 
+(deftest herdr-grid-plan-tiles-roles-in-two-rows
+  (is (= [] (herdr/grid-plan 1)))
+  (is (= [[0 "right" 0.5]] (herdr/grid-plan 2)))
+  (is (= [[0 "right" 0.5] [0 "down" 0.5]] (herdr/grid-plan 3)))
+  (is (= [[0 "right" 0.5] [0 "down" 0.5] [1 "down" 0.5]] (herdr/grid-plan 4)))
+  ;; three columns: each split keeps 1/3 then 1/2 of what remains, so widths are equal
+  (is (= [[0 "right" (/ 1.0 3)] [1 "right" 0.5] [0 "down" 0.5] [1 "down" 0.5] [2 "down" 0.5]]
+         (herdr/grid-plan 6))))
+
 (deftest handoff-lib-validates-priority-and-headers
   (is (handoff-lib/valid-priority? "10"))
   (is (not (handoff-lib/valid-priority? "5")))

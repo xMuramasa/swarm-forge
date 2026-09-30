@@ -123,7 +123,8 @@ window[-invisible] <role> <backend> <worktree> [task|batch] [forward-only|back-o
   `master` worktree; that sentinel means the project's main checkout on its
   current branch. Other names become `.worktrees/<name>` checkouts.
 - `window` and `window-invisible` both start the role as a herdr agent in its own
-  tab of the project's workspace; the two spellings are kept for old configs.
+  pane of the project's workspace (two rows, roles filled in file order); the two
+  spellings are kept for old configs.
 - Receive mode defaults to `task`. `batch` lets a role accept a compatible
   group of queued handoffs together.
 - Propagation defaults to `forward-only`. `back-one` and `back-all` arrange
@@ -215,13 +216,14 @@ The shared runtime is divided by responsibility:
 | `handoffd.*` | Deliver queued handoffs and notify receiving sessions. |
 | `pack_board.*`, `pack_web.*`, `pack/dashboard.html` | Persist and present cards, approvals, clarifications, agent panes, and controls. |
 | `forge.*` | Create, open, refresh, and stop projects inside a forge product. |
-| `herdr.bb` | The one wrapper over the herdr CLI: workspaces, tabs, agents, prompts, reads. |
+| `herdr.bb` | The one wrapper over the herdr CLI: workspaces, panes, agents, prompts, reads. |
 | `close-swarm` | Archive role panes, stop the daemon, and close the project's herdr workspace. |
 
 At startup the composed runtime validates the configuration, initializes git
 when necessary, creates role worktrees, mirrors the managed SwarmForge files
 into them, starts the handoff daemon and local dashboard, and launches each
-configured agent backend in its own tab of a per-project herdr workspace.
+configured agent backend in its own pane of a per-project herdr workspace,
+tiled in a grid.
 
 `master` in a role configuration means the project's main checkout on its
 current branch; it is a worktree sentinel, not a required git branch name.

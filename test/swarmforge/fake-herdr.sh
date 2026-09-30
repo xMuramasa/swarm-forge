@@ -48,7 +48,10 @@ case "$1 $2" in
   "tab create")
     n=$(next_pane)
     printf '{"result":{"type":"tab_created","root_pane":{"pane_id":"w1:p%s"},"tab":{"tab_id":"w1:t%s"}}}\n' "$n" "$n" ;;
-  "tab rename" | "pane run" | "pane wait-output")
+  "pane split")
+    n=$(next_pane)
+    printf '{"result":{"type":"pane_info","pane":{"pane_id":"w1:p%s"}}}\n' "$n" ;;
+  "tab rename" | "pane rename" | "pane run" | "pane wait-output")
     printf '{"result":{"type":"ok"}}\n' ;;
   "workspace close")
     printf '%s\n' "$3" >> "$d/closed.log"
