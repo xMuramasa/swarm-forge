@@ -1,6 +1,6 @@
 {:paths ["test" "swarmforge/scripts"]
  :tasks
- {test {:doc "Run helper tests and dashboard Playwright tests"
+ {test {:doc "Run the Clojure runtime tests and the bun tests of the swarm CLI"
         :task (do
                 (require 'clojure.test)
                 (require 'swarmforge.handoff-test)
@@ -13,27 +13,9 @@
                                                                     'swarmforge.coverage-in-process-test)]
                   (when (pos? (+ fail error))
                     (System/exit (+ fail error))))
-                (let [dir "test/dashboard"
-                      hint "  cd test/dashboard && npm install && npx playwright install chromium"]
-                  (when-not (babashka.fs/which "npx")
-                    (binding [*out* *err*]
-                      (println "npx not found (Node.js is required for dashboard tests).")
-                      (println "Install dashboard tests with:")
-                      (println hint))
-                    (System/exit 1))
-                  (when-not (babashka.fs/exists? (babashka.fs/path dir "node_modules" "@playwright" "test"))
-                    (binding [*out* *err*]
-                      (println "Playwright is not installed in test/dashboard.")
-                      (println "Install dashboard tests with:")
-                      (println hint))
-                    (System/exit 1))
-                  (let [result (babashka.process/shell {:dir dir :continue true}
-                                                       "npx" "playwright" "test")]
-                    (when-not (zero? (:exit result))
-                      (binding [*out* *err*]
-                        (println "Dashboard tests failed. If Chromium is missing, install it with:")
-                        (println "  cd test/dashboard && npx playwright install chromium"))
-                      (System/exit (or (:exit result) 1)))))
+                (let [result (babashka.process/shell {:continue true} "bun" "test" "test/cli")]
+                  (when-not (zero? (:exit result))
+                    (System/exit (or (:exit result) 1))))
                 (System/exit 0))}
   coverage:bb {:doc "Cover Babashka scripts with Cloverage"
                :extra-deps {io.github.unclebob/crap4clj

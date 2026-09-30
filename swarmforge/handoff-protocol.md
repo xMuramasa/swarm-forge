@@ -195,10 +195,10 @@ Used for one short freeform message.
 
 Agents should not send `note` handoffs unless the user, role prompt, or
 constitution explicitly directs them to send one. When blocked by ambiguity,
-contradiction, or test/specification conflict, an agent should ask the operator
-with `pack_dashboard_request.sh clarify ./tmp/question.txt` instead of asking
-in the pane or sending a `note` handoff unless one of those explicit
-authorities directed that note.
+contradiction, or test/specification conflict, the master agent asks the operator
+directly in its pane, and every other agent sends the master agent a `note` with
+its question in the one-line `message`; the master agent asks the operator and
+answers with a `note`. The constitution gives that direction.
 
 Draft:
 
@@ -264,7 +264,7 @@ Responsibilities:
 - Complete the sender's current inbox item only after the audited handoff has
   been queued. Approval, when required, occurs after this audit gate.
 - Preserve the cumulative audit count with the timestamped task ID through
-  lane changes, approval, rejection, and retry. Deletion removes it, and a new
+  lane changes, approval, and rejection. Deletion removes it, and a new
   timestamped task ID starts at zero even when it reuses a visible task name.
 - Generate the canonical body.
 - Atomically install the completed file into `outbox/`.

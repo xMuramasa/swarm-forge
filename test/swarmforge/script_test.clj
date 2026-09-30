@@ -147,12 +147,11 @@
 (deftest swarmforge-required-helpers-include-pack-scripts
   ;; Given the launcher required-helpers list
   ;; When --test-required-helpers
-  ;; Then pack_web.sh and pack_board.sh are listed
+  ;; Then swarmctl.sh and pack_board.sh are listed
   (let [result (run {:dir repo-root} (script "swarmforge.bb") "--test-required-helpers")
         names (set (str/split-lines (str/trim (:out result))))]
-    (is (contains? names "pack_web.sh"))
-    (is (contains? names "pack_board.sh"))
-    (is (contains? names "pack_dashboard_request.sh"))))
+    (is (contains? names "swarmctl.sh"))
+    (is (contains? names "pack_board.sh"))))
 
 (defn write-pack-conf! [root conf]
   (write-file (fs/path root "swarmforge/constitution.prompt") "Read articles.\n")
@@ -160,10 +159,10 @@
   (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
   (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n"))
 
-(deftest swarmforge-launch-plan-starts-pack-web-and-every-agent
+(deftest swarmforge-launch-plan-starts-every-agent
   ;; Given window-invisible specifier and a visible coder window
   ;; When --test-launch-plan
-  ;; Then pack_web starts and both roles get an agent, invisible or not
+  ;; Then both roles get an agent, invisible or not
   (let [root (tmp-dir)]
     (try
       (write-pack-conf! root
@@ -171,7 +170,6 @@
                              "window coder codex coder\n"))
       (let [out (:out (run {:dir root} (script "swarmforge.bb")
                            "--test-launch-plan" (str root)))]
-        (is (str/includes? out "pack_web start"))
         (is (str/includes? out "start-agent specifier"))
         (is (str/includes? out "start-agent coder")))
       (finally
@@ -376,58 +374,6 @@
         (is (str/includes? command "--rules <prompt>"))
         (is (str/includes? command "--verbatim <prompt>"))
         (is (fs/exists? (fs/path root ".swarmforge/prompts/coder.md"))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest start-pack-web-drops-stale-dashboard-url
-  ;; Given a leftover dashboard-url and pack_web.pid from a prior run
-  ;; When SwarmForge prepares to start the dashboard
-  ;; Then those stale files are removed so the new port is recorded
-  (let [root (tmp-dir)]
-    (try
-      (write-file (fs/path root ".swarmforge/dashboard-url") "http://127.0.0.1:64002\n")
-      (write-file (fs/path root ".swarmforge/pack_web.pid") "99999999\n")
-      (let [out (str/trim (:out (run {:dir root}
-                                     (script "swarmforge.bb")
-                                     "--test-reset-pack-web-state"
-                                     (str root))))]
-        (is (= "false false" out))
-        (is (not (fs/exists? (fs/path root ".swarmforge/dashboard-url"))))
-        (is (not (fs/exists? (fs/path root ".swarmforge/pack_web.pid")))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest grok-lieutenant-launch-waits-for-chat
-  ;; Given a host lieutenant
-  ;; When SwarmForge builds the grok launch command
-  ;; Then grok loads rules and stays idle — no initial --verbatim prompt
-  (let [root (tmp-dir)]
-    (try
-      (let [command (:out (run {:dir root}
-                               (script "swarmforge.bb")
-                               "--test-lieutenant-launch-command"
-                               (str root)))]
-        (is (str/includes? command "kind=grok -- --cwd "))
-        (is (str/includes? command "--minimal --rules <prompt>"))
-        (is (not (str/includes? command "--verbatim")))
-        (is (fs/exists? (fs/path root ".swarmforge/prompts/lieutenant.md"))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest lieutenant-launch-reads-host-conf
-  ;; Given a host conf line Lieutenant claude --yolo
-  ;; When SwarmForge builds the lieutenant launch command
-  ;; Then the command uses claude with --yolo
-  (let [root (tmp-dir)]
-    (try
-      (write-file (fs/path root "swarmforge/swarmforge.conf") "Lieutenant claude --yolo\n")
-      (let [command (:out (run {:dir root}
-                               (script "swarmforge.bb")
-                               "--test-lieutenant-launch-command"
-                               (str root)))]
-        (is (str/includes? command "kind=claude -- --append-system-prompt-file "))
-        (is (str/includes? command "--yolo"))
-        (is (not (str/includes? command "kind=grok"))))
       (finally
         (fs/delete-tree root)))))
 
@@ -740,25 +686,6 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest swarmforge-start-order-opens-dashboard-before-agents
-  ;; Given a pack
-  ;; When --test-start-order
-  ;; Then pack_web starts before agents
-  (let [root (tmp-dir)]
-    (try
-      (write-pack-conf! root
-                        (str "window-invisible specifier codex master\n"
-                             "window coder codex coder\n"))
-      (let [out (:out (run {:dir root} (script "swarmforge.bb")
-                           "--test-start-order" (str root)))
-            pack (.indexOf out "pack_web start")
-            agents (.indexOf out "start-agents")]
-        (is (>= pack 0))
-        (is (>= agents 0))
-        (is (< pack agents)))
-      (finally
-        (fs/delete-tree root)))))
-
 (defn commit-body [root]
   (:out (run {:dir root} "git" "log" "-1" "--format=%B")))
 
@@ -1001,14 +928,6 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest pack-web-production-main-does-not-run-test-flags
-  (let [result (run {:dir repo-root :ok? false}
-                    "bb" (script "pack_web.bb") "--test-html")]
-    (is (not (zero? (:exit result))))
-    (is (str/includes? (slurp (script "pack_web.bb")) "--serve"))
-    (is (not (re-find #"--test-state\" \(test-state!" (slurp (script "pack_web.bb")))))
-    (is (str/includes? (slurp (str (fs/path repo-root "test/swarmforge/pack_web_test.bb"))) "--test-state"))))
-
 (deftest get-swarm-forge-composes-mini-forge-from-main-and-the-pack
   ;; Given main (runtime, shared articles) and a mini-forge pack tree
   ;; When get-swarm-forge mini-forge runs in a project
@@ -1087,62 +1006,6 @@
       (finally
         (fs/delete-tree base)
         (fs/delete-tree pack)))))
-
-(deftest get-swarm-forge-copies-only-swarmforge-owned-paths
-  (let [host (tmp-dir)
-        base (tmp-dir)
-        packs (tmp-dir)]
-    (try
-      (write-file (fs/path host "README.md") "host-readme\n")
-      (write-file (fs/path host "bb.edn") "{:paths [\"test\"]}\n")
-      (write-file (fs/path host "test/keep.clj") "keep\n")
-      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
-        (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
-      (write-file (fs/path base "swarm") "#!/bin/sh\necho swarm\n")
-      (write-file (fs/path base "swarmforge/constitution.prompt") "MAIN-CONSTITUTION\n")
-      (write-file (fs/path base "swarmforge/roles/lieutenant.prompt") "LIEUTENANT\n")
-      (write-file (fs/path base "swarmforge/swarmforge.conf") "# Lieutenant grok\n")
-      (write-file (fs/path base "swarmforge/constitution/articles/engineering.prompt") "MAIN-ENGINEERING\n")
-      (write-file (fs/path base "swarmforge/constitution/articles/workflow.prompt") "MAIN-WORKFLOW\n")
-      (write-file (fs/path base "swarmforge/constitution/articles/handoffs.prompt") "MAIN-HANDOFFS\n")
-      (doseq [pack-name ["two-pack" "four-pack" "six-pack"]]
-        (let [pack (fs/path packs pack-name)]
-          (write-file (fs/path pack "swarm") "#!/bin/sh\necho swarm\n")
-          (write-file (fs/path pack "README.md") "pack-readme\n")
-          (write-file (fs/path pack "bb.edn") "pack-bb\n")
-          (write-file (fs/path pack "swarmforge/swarmforge.conf")
-                      "window specifier grok master\n")
-          (write-file (fs/path pack "swarmforge/constitution.prompt") "PACK-CONSTITUTION\n")
-          (write-file (fs/path pack "swarmforge/roles/specifier.prompt") "specifier\n")
-          (write-file (fs/path pack "swarmforge/constitution/articles/engineering.prompt") "PACK-STALE-ENGINEERING\n")
-          (write-file (fs/path pack "swarmforge/constitution/articles/project.prompt") "PACK-PROJECT\n")
-          (write-file (fs/path pack "swarmforge/constitution/articles/local-workflow.prompt") "PACK-LOCAL-WORKFLOW\n")))
-      (let [result (run {:dir host
-                         :env {"SWARMFORGE_BASE_DIR" (str base)
-                               "SWARMFORGE_PACKS_DIR" (str packs)}}
-                        (str (fs/path repo-root "get-swarm-forge"))
-                        "project-manager")]
-        (is (zero? (:exit result)) (:err result))
-        (is (= "host-readme\n" (slurp (str (fs/path host "README.md")))))
-        (is (= "{:paths [\"test\"]}\n" (slurp (str (fs/path host "bb.edn")))))
-        (is (= "keep\n" (slurp (str (fs/path host "test/keep.clj")))))
-        (is (= "MAIN-ENGINEERING\n" (slurp (str (fs/path host "swarmforge/constitution/articles/engineering.prompt")))))
-        (is (= "MAIN-WORKFLOW\n" (slurp (str (fs/path host "swarmforge/constitution/articles/workflow.prompt")))))
-        (is (= "MAIN-HANDOFFS\n" (slurp (str (fs/path host "swarmforge/constitution/articles/handoffs.prompt")))))
-        (is (= "MAIN-CONSTITUTION\n" (slurp (str (fs/path host "swarmforge/constitution.prompt")))))
-        (is (fs/exists? (fs/path host "swarmforge/roles/lieutenant.prompt")))
-        (is (fs/exists? (fs/path host "swarmforge/swarmforge.conf")))
-        (is (not (fs/exists? (fs/path host "swarmforge/roles/specifier.prompt"))))
-        (is (not (fs/exists? (fs/path host "swarmforge/constitution/articles/project.prompt"))))
-        (is (= "PACK-PROJECT\n" (slurp (str (fs/path host "packs/two-pack/swarmforge/constitution/articles/project.prompt")))))
-        (is (= "PACK-LOCAL-WORKFLOW\n" (slurp (str (fs/path host "packs/four-pack/swarmforge/constitution/articles/local-workflow.prompt")))))
-        (is (fs/directory? (fs/path host "projects")))
-        (is (fs/exists? (fs/path host "packs/six-pack/swarmforge/swarmforge.conf")))
-        (is (fs/exists? (fs/path host "swarm"))))
-      (finally
-        (fs/delete-tree host)
-        (fs/delete-tree base)
-        (fs/delete-tree packs)))))
 
 (deftest crap-script-fails-when-a-function-is-over-the-threshold
   ;; Given a fake lizard and a coverage report where classify is half covered (CRAP 8.1)

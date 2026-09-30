@@ -294,8 +294,7 @@
    "handoffd.bb" "stop_handoff_daemon.bb" "stop_handoff_daemon.sh"
    "swarmforge.sh" "swarmforge.bb"
    "pack_board.sh" "pack_board.bb"
-   "pack_web.sh" "pack_web.bb"
-   "pack_dashboard_request.sh" "pack_dashboard_request.bb"])
+   "swarmctl.sh" "swarmctl.ts"])
 
 (defn check-helper-scripts! [ctx]
   (doseq [helper required-helpers]
@@ -435,9 +434,8 @@
          "- Run constitution tools one at a time. Worker-limited tools use `--max-workers 4` or `--workers 4`. Mutation is differential: no `--mutate-all`, no `--level full`.\n"
          "- Do not clone those repos into `./tmp`.\n"
          "- If merge_and_process.sh or ready_for_next reports a merge conflict, resolve the conflicted files, git add, and commit. Do not invent git merge. Parallel cards on one tree will conflict; that is expected.\n"
-         "- Operator follow-ups arrive as `[id] text` in this pane. Answer with `pack_dashboard_request.sh answer <id> ./tmp/answer.txt`.\n"
-         "- Ask the operator with `pack_dashboard_request.sh clarify ./tmp/question.txt`. Do not ask in the pane.\n"
-         "- Do not ask for approval in the pane. Queue `git_handoff`; the operator uses Attention.\n"
+         "- If you are the master agent, ask the operator directly in this pane. Otherwise send a `note` handoff to the master agent with your one-line question; do not ask in your own pane.\n"
+         "- Do not ask for approval in the pane. Queue `git_handoff`; the operator approves with `./swarm approve`.\n"
          (when last-role?
            (str "- You are the last role in this pack. After this pack step, queue a git_handoff. The helper marks the card Done. Do not list every other role on to: to finish the card.\n"))
          (when (= role "specifier")
@@ -448,19 +446,14 @@
            (str "- One commit is one git_handoff. Do not send two git_handoffs of the same SHA.\n")))))
 
 (defn last-pack-role? [ctx role]
-  (and (not= role "lieutenant")
-       (= role (:role (last (:roles ctx))))))
+  (= role (:role (last (:roles ctx)))))
 
 (defn write-agent-instruction-file! [ctx role prompt-file last-role?]
-  (if (= role "lieutenant")
-    (fs/copy (fs/path (:roles-dir ctx) "lieutenant.prompt")
-             prompt-file
-             {:replace-existing true})
-    (spit (str prompt-file)
-          (str "Read swarmforge/constitution.prompt, then read every file it refers to recursively, and obey all of those instructions.\n"
-               "Read swarmforge/roles/" role ".prompt, then read every file it refers to recursively, and follow all of those instructions.\n"
-               "\n"
-               (tool-startup-section role last-role?)))))
+  (spit (str prompt-file)
+        (str "Read swarmforge/constitution.prompt, then read every file it refers to recursively, and obey all of those instructions.\n"
+             "Read swarmforge/roles/" role ".prompt, then read every file it refers to recursively, and follow all of those instructions.\n"
+             "\n"
+             (tool-startup-section role last-role?))))
 
 (defn extra-args-prefix [row]
   (let [args (:extra-args row)]
@@ -496,7 +489,7 @@
   [s]
   (if (str/blank? s) [] (str/split (str/trim s) #"\s+")))
 
-(defn agent-argv [row display role-worktree prompt-file prompt initial-prompt?]
+(defn agent-argv [row display role-worktree prompt-file prompt]
   (let [agent (:agent row)
         extra (split-args (:extra-args row))
         pf (str prompt-file)
@@ -507,23 +500,22 @@
                         (split-args (yolo-flag agent row))
                         ["-n" (str "SwarmForge " display)]
                         extra
-                        (when initial-prompt? [prompt]))
+                        [prompt])
        "codex" (concat ["-C" wt]
                        (split-args (no-alt-screen-flag agent row))
                        (split-args (yolo-flag agent row))
                        extra
-                       (when initial-prompt? [prompt]))
+                       [prompt])
        "copilot" (concat ["-C" wt]
                          (split-args (no-alt-screen-flag agent row))
                          ["--name" (str "SwarmForge " display)]
                          (split-args (yolo-flag agent row))
                          extra
-                         (when initial-prompt? ["-i" prompt]))
+                         ["-i" prompt])
        "grok" (concat ["--cwd" wt]
                       (split-args (grok-permission-prefix row))
                       extra
-                      ["--minimal" "--rules" prompt]
-                      (when initial-prompt? ["--verbatim" prompt]))))))
+                      ["--minimal" "--rules" prompt "--verbatim" prompt])))))
 
 (defn account-env [ctx agent]
   (when-let [dir (get-in ctx [:account :dirs agent])]
@@ -541,8 +533,7 @@
                           (:script-dir ctx)
                           (fs/path role-worktree "swarmforge" "scripts"))
         prompt-file (fs/path (:prompts-dir ctx) (str role ".md"))
-        tool-bin (fs/path (:working-dir ctx) ".swarmforge" "bin")
-        initial-prompt? (not= role "lieutenant")]
+        tool-bin (fs/path (:working-dir ctx) ".swarmforge" "bin")]
     (write-agent-instruction-file! ctx role prompt-file (last-pack-role? ctx role))
     (let [prompt (slurp (str prompt-file))]
       {:agent agent
@@ -552,7 +543,7 @@
        :env (cond-> (merge {"SWARMFORGE_ROLE" role} (account-env ctx agent))
               (not (str/blank? (alt-screen-env agent row)))
               (assoc "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN" "1"))
-       :argv (agent-argv row (:display-name row) role-worktree prompt-file prompt initial-prompt?)})))
+       :argv (agent-argv row (:display-name row) role-worktree prompt-file prompt)})))
 
 (defn codex-home []
   (or (not-empty (System/getenv "CODEX_HOME"))
@@ -637,50 +628,7 @@
                   reset))))
 
 (defn launch-plan-lines [ctx]
-  (cons "pack_web start" (map #(str "start-agent " (:role %)) (:roles ctx))))
-
-(defn wait-for-file [path timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (cond
-        (fs/exists? path) true
-        (> (System/currentTimeMillis) deadline) false
-        :else (do (Thread/sleep 50) (recur))))))
-
-(defn dashboard-url-file [ctx]
-  (fs/path (:state-dir ctx) "dashboard-url"))
-
-(defn pack-web-pid-file [ctx]
-  (fs/path (:state-dir ctx) "pack_web.pid"))
-
-(defn stop-existing-pack-web! [ctx]
-  (let [file (pack-web-pid-file ctx)
-        pid (when (fs/regular-file? file)
-              (not-empty (str/trim (slurp (str file)))))]
-    (when pid
-      (process/sh {:continue true} "kill" "-TERM" pid))
-    (fs/delete-if-exists file)
-    (fs/delete-if-exists (dashboard-url-file ctx))))
-
-(defn open-browser? []
-  (not= "0" (System/getenv "SWARMFORGE_OPEN_BROWSER")))
-
-(defn maybe-open-browser! [url]
-  (when (and (open-browser?) (command-exists? "open"))
-    (process/sh {:continue true} "open" url)))
-
-(defn start-pack-web! [ctx]
-  (stop-existing-pack-web! ctx)
-  (let [script (str (fs/path (:script-dir ctx) "pack_web.sh"))
-        log (fs/path (:state-dir ctx) "dashboard.log")]
-    (process/process [script "--serve" (str (:working-dir ctx))]
-                     {:out (str log) :err :out})
-    (when-not (wait-for-file (dashboard-url-file ctx) 5000)
-      (fail! (str red "Error:" reset " Dashboard did not start.")))
-    (let [url (str/trim (slurp (str (dashboard-url-file ctx))))]
-      (println (str green "Dashboard: " url reset))
-      (maybe-open-browser! url)
-      url)))
+  (map #(str "start-agent " (:role %)) (:roles ctx)))
 
 (defn context [working-dir]
   (let [working-dir (fs/absolutize (fs/path working-dir))
@@ -732,10 +680,6 @@
   (doseq [line (launch-plan-lines (prepare-ctx (context root)))]
     (println line)))
 
-(defn test-start-order! [_root]
-  (println "pack_web start")
-  (println "start-agents"))
-
 (defn kill-existing-sessions! [ctx]
   (when (herdr/workspace-id (:working-dir ctx))
     (println (str yellow "Existing SwarmForge workspace found. Closing it..." reset))
@@ -751,8 +695,12 @@
   (doseq [row (:roles ctx)]
     (println (str "  " (:display-name row) ": " (:session row))))
   (println)
-  (println (str green "Tip: Write a handoff draft and run swarm_handoff.sh while the swarm is running." reset))
-  (println (str green "Tip: Watch and answer the agents in the herdr workspace '"
+  (println (str green "Operate the swarm from this directory:" reset))
+  (println "  ./swarm status                              roles, tasks, and what waits for you")
+  (println "  ./swarm task new <name> \"description\"      start work: it goes to the master agent")
+  (println "  ./swarm approve <id>                        release a spec the specifier submitted")
+  (println "  ./swarm reject <id> \"comments\"             send a spec back")
+  (println (str green "Talk to the master agent directly in its pane of the herdr workspace '"
                 (herdr/project-slug (:working-dir ctx)) "'." reset))
   (println))
 
@@ -818,36 +766,8 @@
       (boot-sessions!)
       (sync-worktree-scripts! ctx)
       (start-handoff-daemon! ctx)
-      (start-pack-web! ctx)
       (launch-roles! ctx)
       (announce-ready! ctx))))
-
-(defn parse-lieutenant-config [ctx]
-  (let [file (:config-file ctx)
-        fallback (str/lower-case (or (not-empty (System/getenv "SWARMFORGE_LIEUTENANT_AGENT")) "grok"))]
-    (if-not (fs/regular-file? file)
-      {:agent fallback :extra-args nil}
-      (or (some (fn [raw]
-                  (let [line (str/trim raw)]
-                    (when-not (skip-config-line? line)
-                      (let [fields (str/split line #"\s+")]
-                        (when (and (>= (count fields) 2)
-                                   (= (str/lower-case (first fields)) "lieutenant"))
-                          (let [agent (str/lower-case (second fields))]
-                            (reject-if (not (known-agents agent))
-                                       (str "Unsupported agent '" (second fields)
-                                            "' for lieutenant"))
-                            {:agent agent
-                             :extra-args (extra-args-str (drop 2 fields))}))))))
-                (str/split-lines (slurp (str file))))
-          {:agent fallback :extra-args nil}))))
-
-(defn lieutenant-row [ctx]
-  (let [{:keys [agent extra-args]} (parse-lieutenant-config ctx)]
-    (window-row ctx "lieutenant" agent "master" "task" "forward-only" extra-args false)))
-
-(defn forge-root? [root]
-  (fs/directory? (fs/path root "packs")))
 
 (defn run-stop-project! [root]
   (let [ctx (context root)]
@@ -857,59 +777,6 @@
                 "archive-all" "--root" (str (:working-dir ctx)))
     (stop-handoff-daemon! ctx)
     (herdr/close-workspace! (:working-dir ctx))))
-
-(defn run-host! [root]
-  (check-herdr!)
-  (check-dependency! "git")
-  (check-dependency! "bb")
-  (let [ctx (context root)
-        row (lieutenant-row ctx)
-        ctx (resolve-account (assoc ctx :roles [row] :host? true))]
-    (check-account-dirs! ctx)
-    (when-not (fs/exists? (fs/path (:roles-dir ctx) "lieutenant.prompt"))
-      (fail! (str red "Error:" reset " Missing lieutenant prompt at "
-                  (fs/path (:roles-dir ctx) "lieutenant.prompt"))))
-    (check-backend-dependencies! ctx)
-    (fs/create-dirs (fs/path (:working-dir ctx) "projects"))
-    (prepare-workspace! ctx)
-    (let [open-file (fs/path (:state-dir ctx) "open-projects")
-          lingering (if (fs/regular-file? open-file)
-                      (->> (str/split-lines (slurp (str open-file)))
-                           (map str/trim)
-                           (remove str/blank?)
-                           vec)
-                      [])]
-      (doseq [name lingering]
-        (run-stop-project! (str (fs/path (:working-dir ctx) "projects" name))))
-      (fs/create-dirs (:state-dir ctx))
-      (spit (str open-file) ""))
-    (kill-existing-sessions! ctx)
-    (boot-sessions!)
-    (start-pack-web! ctx)
-    (launch-roles! ctx)
-    (announce-ready! ctx)))
-
-(defn run-project! [root]
-  (check-herdr!)
-  (check-dependency! "git")
-  (check-dependency! "bb")
-  (check-integration-branch! (context root))
-  (let [ctx (context root)]
-    (initialize-git-repo! ctx)
-    (ensure-runtime-git-excludes! ctx)
-    (install-commit-msg-hook! ctx)
-    (let [ctx (prepare-ctx ctx)]
-      (check-backend-dependencies! ctx)
-      (prepare-workspace! ctx)
-      (prepare-worktrees! ctx)
-      (prepare-handoff-dirs! ctx)
-      (stop-handoff-daemon! ctx)
-      (kill-existing-sessions! ctx)
-      (boot-sessions!)
-      (sync-worktree-scripts! ctx)
-      (start-handoff-daemon! ctx)
-      (launch-roles! ctx)
-      (announce-ready! ctx))))
 
 (defn test-branch-check! [root]
   (check-integration-branch! (context root))
@@ -942,15 +809,6 @@
     (fs/create-dirs (:prompts-dir ctx))
     (print-launch-spec! ctx row)))
 
-(defn test-lieutenant-launch-command! [root]
-  (let [ctx (context root)
-        row (assoc (lieutenant-row ctx) :worktree-path (fs/path root))]
-    (fs/create-dirs (:prompts-dir ctx))
-    (fs/create-dirs (:roles-dir ctx))
-    (when-not (fs/exists? (fs/path (:roles-dir ctx) "lieutenant.prompt"))
-      (spit (str (fs/path (:roles-dir ctx) "lieutenant.prompt")) "lieutenant\n"))
-    (print-launch-spec! ctx row)))
-
 (defn test-install-hooks! [root]
   (let [ctx (context root)]
     (install-commit-msg-hook! ctx)
@@ -962,36 +820,21 @@
 (defn test-ensure-codex-trust! [dir & [home]]
   (ensure-codex-trust! dir home))
 
-(defn test-reset-pack-web-state! [root]
-  (let [ctx (context root)]
-    (fs/create-dirs (:state-dir ctx))
-    (stop-existing-pack-web! ctx)
-    (println (str (boolean (fs/exists? (dashboard-url-file ctx))) " "
-                  (boolean (fs/exists? (pack-web-pid-file ctx)))))))
-
 (defn -main [& args]
   (case (first args)
     "--test-parse" (test-parse! (or (second args) (System/getProperty "user.dir")))
     "--test-required-helpers" (test-required-helpers!)
     "--test-branch-check" (test-branch-check! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-plan" (test-launch-plan! (or (second args) (System/getProperty "user.dir")))
-    "--test-start-order" (test-start-order! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-roles" (test-launch-roles! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-command" (apply test-launch-command!
                                      (or (second args) (System/getProperty "user.dir"))
                                      (drop 2 args))
-    "--test-lieutenant-launch-command" (test-lieutenant-launch-command!
-                                        (or (second args) (System/getProperty "user.dir")))
     "--test-install-hooks" (test-install-hooks! (second args))
     "--test-sleep-inhibitor-prefix" (test-sleep-inhibitor-prefix!)
     "--test-ensure-codex-trust" (apply test-ensure-codex-trust! (rest args))
-    "--test-reset-pack-web-state" (test-reset-pack-web-state! (second args))
-    "--start-project" (run-project! (second args))
     "--stop-project" (run-stop-project! (second args))
-    (let [root (or (first args) (System/getProperty "user.dir"))]
-      (if (forge-root? root)
-        (run-host! root)
-        (run-main! root)))))
+    (run-main! (or (first args) (System/getProperty "user.dir")))))
 
 (when (= (str *file*) (System/getProperty "babashka.file"))
   (apply -main *command-line-args*))

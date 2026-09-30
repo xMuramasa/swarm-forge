@@ -2,14 +2,13 @@
 set -euo pipefail
 
 default_repo_url="https://github.com/xMuramasa/swarm-forge"
-pack_names=(two-pack four-pack six-pack)
 
 usage() {
-  echo "usage: get-swarm-forge <mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant> [language]" >&2
-  echo "  Packs (mini-forge, two-pack, four-pack, six-pack) compose into the current directory." >&2
-  echo "  language (packs only): typescript, python, go, clojure, java, babashka. Written into the" >&2
-  echo "  project's constitution so the agents pick that language's tools." >&2
-  echo "  project-manager and lieutenant are forges (projects/, dashboard, host lieutenant)." >&2
+  echo "usage: get-swarm-forge mini-forge [language]" >&2
+  echo "  Composes the pack into the current directory: the runtime and shared articles from main," >&2
+  echo "  the roles and configuration from the pack branch." >&2
+  echo "  language: typescript, python, go, clojure, java, babashka. Written into the project's" >&2
+  echo "  constitution so the agents pick that language's tools." >&2
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -25,9 +24,9 @@ fi
 product="$1"
 language="${2:-}"
 case "$product" in
-  mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant) ;;
+  mini-forge) ;;
   *)
-    echo "get-swarm-forge: unknown product '$product'" >&2
+    echo "get-swarm-forge: unknown pack '$product'" >&2
     usage
     exit 1
     ;;
@@ -47,19 +46,11 @@ if [[ -n "$language" ]]; then
       exit 1
       ;;
   esac
-  if [[ "$product" == project-manager || "$product" == lieutenant ]]; then
-    echo "get-swarm-forge: a language applies to packs, not to the '$product' forge" >&2
-    exit 1
-  fi
 fi
 
 repo_url="${SWARMFORGE_REPO_URL:-$default_repo_url}"
 tmp_dir="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$tmp_dir"
-}
-trap cleanup EXIT
+trap 'rm -rf "$tmp_dir"' EXIT
 
 local_git_dir() {
   if [[ -v SWARMFORGE_GIT_DIR ]]; then
@@ -101,18 +92,6 @@ download_branch() {
   exit 1
 }
 
-set_project_language() {
-  local project_prompt="swarmforge/constitution/articles/project.prompt"
-  if [[ -n "$language_name" ]]; then
-    [[ -f "$project_prompt" ]] || fail_missing "$project_prompt"
-    sed -i.bak "s/^- Project language: .*/- Project language: ${language_name}./" "$project_prompt"
-    rm -f "$project_prompt.bak"
-  elif [[ -f "$project_prompt" ]] && grep -q "^- Project language: not set" "$project_prompt"; then
-    echo "get-swarm-forge: the project language is not set. Rerun with a language (get-swarm-forge $product typescript)" >&2
-    echo "  or edit the 'Project language' line in $project_prompt." >&2
-  fi
-}
-
 fail_missing() {
   local missing_path="$1"
   echo "get-swarm-forge: missing required file after composing swarm: $missing_path" >&2
@@ -134,43 +113,17 @@ copy_shared_scripts_and_articles() {
   done
 }
 
-copy_host_files() {
-  local src="$1"
-  copy_shared_scripts_and_articles "$src"
-  [[ -f "$src/swarmforge/constitution.prompt" ]] \
-    && cp "$src/swarmforge/constitution.prompt" swarmforge/constitution.prompt
-  mkdir -p swarmforge/roles
-  [[ -f "$src/swarmforge/roles/lieutenant.prompt" ]] \
-    && cp "$src/swarmforge/roles/lieutenant.prompt" swarmforge/roles/lieutenant.prompt
-  if [[ ! -f swarmforge/swarmforge.conf && -f "$src/swarmforge/swarmforge.conf" ]]; then
-    cp "$src/swarmforge/swarmforge.conf" swarmforge/swarmforge.conf
-  fi
-  if [[ -f "$src/swarm" ]]; then
-    cp "$src/swarm" swarm
-  elif [[ ! -f swarm ]]; then
-    cat > swarm <<'WRAP'
-#!/bin/zsh
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$SCRIPT_DIR/swarmforge/scripts/swarmforge.sh" "$@"
-WRAP
-  fi
-  chmod +x swarm
-}
-
 copy_pack_template() {
   local src="$1"
-  local dest="$2"
-  mkdir -p "$dest/swarmforge"
-  [[ -f "$src/swarm" ]] && cp "$src/swarm" "$dest/swarm"
+  [[ -f "$src/swarm" ]] && cp "$src/swarm" swarm
   [[ -f "$src/swarmforge/swarmforge.conf" ]] || fail_missing "swarmforge/swarmforge.conf in pack"
   [[ -d "$src/swarmforge/roles" ]] || fail_missing "swarmforge/roles in pack"
-  cp "$src/swarmforge/swarmforge.conf" "$dest/swarmforge/swarmforge.conf"
+  cp "$src/swarmforge/swarmforge.conf" swarmforge/swarmforge.conf
   [[ -f "$src/swarmforge/constitution.prompt" ]] \
-    && cp "$src/swarmforge/constitution.prompt" "$dest/swarmforge/constitution.prompt"
-  rm -rf "$dest/swarmforge/roles"
-  cp -R "$src/swarmforge/roles" "$dest/swarmforge/roles"
-  mkdir -p "$dest/swarmforge/constitution/articles"
+    && cp "$src/swarmforge/constitution.prompt" swarmforge/constitution.prompt
+  rm -rf swarmforge/roles
+  cp -R "$src/swarmforge/roles" swarmforge/roles
+  mkdir -p swarmforge/constitution/articles
   if [[ -d "$src/swarmforge/constitution/articles" ]]; then
     for pack_article in "$src/swarmforge/constitution/articles"/*; do
       [[ -f "$pack_article" ]] || continue
@@ -178,135 +131,64 @@ copy_pack_template() {
       case "$article_name" in
         engineering.prompt|workflow.prompt|handoffs.prompt) continue ;;
       esac
-      cp "$pack_article" "$dest/swarmforge/constitution/articles/$article_name"
+      cp "$pack_article" "swarmforge/constitution/articles/$article_name"
     done
   fi
 }
 
+set_project_language() {
+  local project_prompt="swarmforge/constitution/articles/project.prompt"
+  if [[ -n "$language_name" ]]; then
+    [[ -f "$project_prompt" ]] || fail_missing "$project_prompt"
+    sed -i.bak "s/^- Project language: .*/- Project language: ${language_name}./" "$project_prompt"
+    rm -f "$project_prompt.bak"
+  elif [[ -f "$project_prompt" ]] && grep -q "^- Project language: not set" "$project_prompt"; then
+    echo "get-swarm-forge: the project language is not set. Rerun with a language (get-swarm-forge $product typescript)" >&2
+    echo "  or edit the 'Project language' line in $project_prompt." >&2
+  fi
+}
+
 verify_pack_roles() {
-  local dest="$1"
-  [[ -f "$dest/swarmforge/swarmforge.conf" ]] || fail_missing "$dest/swarmforge/swarmforge.conf"
+  local role
   while IFS= read -r role; do
-    [[ -f "$dest/swarmforge/roles/${role}.prompt" ]] \
-      || fail_missing "$dest/swarmforge/roles/${role}.prompt"
-  done < <(awk '/^window/ { print $2 }' "$dest/swarmforge/swarmforge.conf")
+    [[ -f "swarmforge/roles/${role}.prompt" ]] || fail_missing "swarmforge/roles/${role}.prompt"
+  done < <(awk '/^window/ { print $2 }' swarmforge/swarmforge.conf)
 }
 
-pack_tree() {
-  local name="$1"
-  if [[ -n "$packs_src" && -d "$packs_src/$name" ]]; then
-    echo "$packs_src/$name"
-  elif [[ -n "$packs_src" && -f "$packs_src/swarmforge/swarmforge.conf" ]]; then
-    echo "$packs_src"
-  else
-    echo ""
-  fi
-}
-
-install_project_pack() {
-  local pack_src
-  pack_src="$(pack_tree "$product")"
-  if [[ -z "$pack_src" && -d "$host_dir/.swarmforge/project-pack" ]]; then
-    pack_src="$host_dir/.swarmforge/project-pack"
-  fi
-  [[ -n "$pack_src" && -d "$pack_src" ]] || fail_missing ".swarmforge/project-pack"
-  mkdir -p .swarmforge/project-pack
-  copy_pack_template "$pack_src" ".swarmforge/project-pack"
-  verify_pack_roles ".swarmforge/project-pack"
-}
-
-install_named_packs() {
-  mkdir -p packs
-  local pack_name pack_src
-  for pack_name in "${pack_names[@]}"; do
-    pack_src="$(pack_tree "$pack_name")"
-    if [[ -z "$pack_src" ]]; then
-      pack_src="$tmp_dir/packs/$pack_name"
-      download_branch "$pack_name" "$pack_src"
-    fi
-    [[ -n "$pack_src" && -d "$pack_src" ]] || fail_missing "pack $pack_name"
-    copy_pack_template "$pack_src" "packs/$pack_name"
-    verify_pack_roles "packs/$pack_name"
-  done
-}
-
-require_files() {
-  local required_path
-  for required_path in "$@"; do
-    [[ -e "$required_path" ]] || fail_missing "$required_path"
-  done
-}
-
-host_dir="${SWARMFORGE_BASE_DIR:-$tmp_dir/host}"
-host_from="$product"
-packs_src="${SWARMFORGE_PACKS_DIR:-}"
-main_dir="$tmp_dir/main"
-
-if [[ "$product" == mini-forge || "$product" == two-pack || "$product" == four-pack || "$product" == six-pack ]]; then
-  if [[ -z "${SWARMFORGE_BASE_DIR:-}" ]]; then
-    download_branch "main" "$main_dir"
-    host_dir="$main_dir"
-  fi
-  pack_src="$(pack_tree "$product")"
-  if [[ -z "$pack_src" ]]; then
-    pack_src="$tmp_dir/pack"
-    download_branch "$product" "$pack_src"
-  fi
-  [[ -n "$pack_src" && -d "$pack_src" ]] || fail_missing "pack $product"
-  copy_shared_scripts_and_articles "$host_dir"
-  copy_pack_template "$pack_src" "."
-  set_project_language
-  [[ -f swarm ]] || fail_missing "swarm from pack $product"
-  chmod +x swarm
-  verify_pack_roles "."
-  require_files \
-    swarm \
-    swarmforge/scripts/swarmforge.sh \
-    swarmforge/scripts/handoffd.bb \
-    swarmforge/scripts/done_with_current.sh \
-    swarmforge/constitution/articles/handoffs.prompt \
-    swarmforge/constitution/articles/workflow.prompt \
-    swarmforge/constitution/articles/engineering.prompt \
-    swarmforge/swarmforge.conf \
-    swarmforge/constitution.prompt
-  echo "SwarmForge pack installed from $product. Run ./swarm to start the pack."
-  exit 0
-fi
-
+# SWARMFORGE_BASE_DIR and SWARMFORGE_PACKS_DIR point at local trees instead of GitHub branches.
+host_dir="${SWARMFORGE_BASE_DIR:-$tmp_dir/main}"
 if [[ -z "${SWARMFORGE_BASE_DIR:-}" ]]; then
-  download_branch "$product" "$host_dir"
+  download_branch "main" "$host_dir"
 fi
 
-mkdir -p projects
-copy_host_files "$host_dir"
-
-if [[ "$product" == "lieutenant" ]]; then
-  install_project_pack
+packs_src="${SWARMFORGE_PACKS_DIR:-}"
+if [[ -n "$packs_src" && -d "$packs_src/$product" ]]; then
+  pack_src="$packs_src/$product"
+elif [[ -n "$packs_src" && -f "$packs_src/swarmforge/swarmforge.conf" ]]; then
+  pack_src="$packs_src"
 else
-  install_named_packs
+  pack_src="$tmp_dir/pack"
+  download_branch "$product" "$pack_src"
 fi
 
-required_files=(
-  swarm
-  swarmforge/scripts/swarmforge.sh
-  swarmforge/scripts/handoffd.bb
-  swarmforge/scripts/done_with_current.sh
-  swarmforge/constitution/articles/handoffs.prompt
-  swarmforge/constitution/articles/workflow.prompt
-  swarmforge/constitution/articles/engineering.prompt
-  swarmforge/roles/lieutenant.prompt
-)
+copy_shared_scripts_and_articles "$host_dir"
+copy_pack_template "$pack_src"
+set_project_language
+[[ -f swarm ]] || fail_missing "swarm from pack $product"
+chmod +x swarm
+verify_pack_roles
 
-if [[ "$product" == "lieutenant" ]]; then
-  required_files+=(.swarmforge/project-pack/swarmforge/swarmforge.conf)
-else
-  required_files+=(
-    packs/two-pack/swarmforge/swarmforge.conf
-    packs/four-pack/swarmforge/swarmforge.conf
-    packs/six-pack/swarmforge/swarmforge.conf
-  )
-fi
+for required in \
+  swarm \
+  swarmforge/scripts/swarmforge.sh \
+  swarmforge/scripts/handoffd.bb \
+  swarmforge/scripts/done_with_current.sh \
+  swarmforge/constitution/articles/handoffs.prompt \
+  swarmforge/constitution/articles/workflow.prompt \
+  swarmforge/constitution/articles/engineering.prompt \
+  swarmforge/swarmforge.conf \
+  swarmforge/constitution.prompt; do
+  [[ -e "$required" ]] || fail_missing "$required"
+done
 
-require_files "${required_files[@]}"
-
-echo "SwarmForge forge installed from $host_from. Run ./swarm to start the dashboard."
+echo "SwarmForge pack installed from $product. Run ./swarm to start the pack."

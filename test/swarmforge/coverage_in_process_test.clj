@@ -9,8 +9,6 @@
             [herdr]
             [merge-and-process]
             [pack-board]
-            [pack-dashboard-request]
-            [pack-web]
             [ready-for-next-guard]
             [stop-handoff-daemon]
             [swarm-handoff]
@@ -84,20 +82,9 @@
       (finally
         (fs/delete-tree root)))))
 
-(deftest pack-web-reads-query-values
-  (is (= "HTW" (pack-web/query-value "/api/task?name=HTW" "name")))
-  (is (nil? (pack-web/query-value "/api/task" "name"))))
-
 (deftest pack-board-parses-flags
   (is (= {:positional ["list"] :root "/tmp/root"}
          (pack-board/parse-args ["list" "--root" "/tmp/root"]))))
-
-(deftest swarmforge-classifies-worktrees-and-windows
-  (is (swarmforge/special-worktree? "master"))
-  (is (swarmforge/special-worktree? "none"))
-  (is (not (swarmforge/special-worktree? "coder")))
-  (is (true? (swarmforge/visible-window? "window" 1)))
-  (is (false? (swarmforge/visible-window? "window-invisible" 2))))
 
 (deftest handoffd-parses-recipients-and-messages
   (is (= ["coder" "cleaner"] (handoffd/recipient-list {"to" "coder, cleaner"})))
@@ -261,52 +248,16 @@
     (is (some #(re-find #"underscores" %) errors))
     (is (some #(re-find #"Duplicate recipient 'receiver'" %) errors))))
 
-(deftest pack-web-routes-and-parsing
-  (is (= 404 (:status (pack-web/handle-get nil "/missing"))))
-  (is (= 404 (:status (pack-web/handle-post nil "/nope" ""))))
-  (is (seq (pack-web/codex-bullets "• one\n  continued\n• two\n")))
-  (is (true? (pack-web/confirm-teardown? "TEARDOWN")))
-  (is (false? (pack-web/confirm-teardown? "no")))
-  (is (= "&lt;x&gt;" (pack-web/html-escape "<x>")))
-  (let [entry (pack-web/task-entry "HTW\tspecifier\tnow\tnow\tid1\t2")]
-    (is (= "HTW" (:name entry)))
-    (is (= 2 (:audit_count entry))))
-  (is (seq (pack-web/parse-unified-diff "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")))
-  (let [missing (pack-web/handle-request nil {:method "HEAD" :uri "/missing" :body nil})]
-    (is (= 404 (:status missing)))))
-
-(deftest swarmforge-launch-helpers
-  (is (= "--yolo " (swarmforge/yolo-flag "codex" {:extra-args ""})))
-  (is (= "" (swarmforge/yolo-flag "codex" {:extra-args "--yolo"})))
-  (is (= "--permission-mode bypassPermissions "
-         (swarmforge/yolo-flag "claude" {:extra-args ""})))
-  (is (= "" (swarmforge/yolo-flag "unknown" {:extra-args ""})))
-  (is (swarmforge/skip-config-line? "# hi"))
-  (is (swarmforge/skip-config-line? ""))
-  (is (not (swarmforge/special-worktree? "coder")))
-  (is (some? (swarmforge/sleep-inhibitor-prefix))))
-
 (deftest pack-board-helpers
   (is (= "hello" (pack-board/slug "Hello!")))
   (is (= 3 (pack-board/parse-count "3")))
   (is (= 0 (pack-board/parse-count "x")))
   (is (re-find #"\tlane2\t" (pack-board/rewrite-lane "n\tlane1\tc\tu\tid\t0" "n" "lane2"))))
 
-(deftest stop-daemon-with-no-pid
-  (let [root (tmp-dir)]
-    (try
-      (stop-handoff-daemon/stop! (str root) :timeout-ms 10)
-      (is (not (fs/exists? (fs/path root ".swarmforge/daemon/handoffd.pid"))))
-      (finally
-        (fs/delete-tree root)))))
-
 (deftest handoffd-skips-board-update-without-board
   (is (nil? (handoffd/update-board! {} {"type" "note"})))
   (is (false? (handoffd/non-forwarding? {})))
   (is (nil? (handoffd/recipient-list {}))))
-
-(deftest dashboard-request-helpers
-  (is (string? pack-dashboard-request/usage-text)))
 
 (deftest swarm-tool-usage
   (is (fn? swarm-tool/-main)))
