@@ -163,6 +163,16 @@ describe("reject", () => {
     expect(sent).toContain("send a new git_handoff to coder");
   });
 
+  test("counts the audit even when the held handoff has no task_id (found by task name)", async () => {
+    write(
+      state("handoffs", "pending_approval", `${APPROVAL}.handoff`),
+      "from: specifier\nto: coder\ntype: git_handoff\ntask: R-030\n\npayload\n",
+    );
+    agent("sf-specifier");
+    await reject(root, APPROVAL, "change it");
+    expect(readCards(root)[0].auditCount).toBe(1);
+  });
+
   test("warns when the specifier cannot be reached, but still discards the spec", async () => {
     seedApproval();
     const { warning } = await reject(root, APPROVAL, "change it");

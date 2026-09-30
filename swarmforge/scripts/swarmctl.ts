@@ -198,7 +198,7 @@ export function formatStatus(s: Status): string {
       r.state === "blocked" ? "  <- waiting for input in herdr"
       : r.working.length ? `  working on: ${r.working.join(", ")}`
       : r.queued ? `  ${r.queued} queued` : "";
-    out.push(`  ${pad(r.role, width)}${pad(r.state, 10)}${note}`);
+    out.push(`  ${pad(r.role, width)}${pad(r.state, 10)}${note}`.trimEnd());
   }
   out.push("", "Tasks");
   if (!s.tasks.length) out.push("  none");
