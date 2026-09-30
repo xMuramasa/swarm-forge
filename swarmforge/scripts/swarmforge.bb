@@ -281,7 +281,7 @@
 
 (def required-helpers
   ["handoff_lib.ts" "swarm_handoff.sh" "swarm_handoff.ts"
-   "swarm_tool.sh" "swarm_tool.bb"
+   "swarm_tool.sh" "swarm_tool.ts"
    "commit-msg-hook.sh" "commit_msg_hook.ts"
    "merge_and_process.sh" "merge_and_process.ts"
    "ready_for_next.sh" "ready_for_next.ts"
