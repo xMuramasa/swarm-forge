@@ -33,8 +33,8 @@ get-swarm-forge mini-forge
 ./swarm
 ```
 
-The agents run in a herdr workspace named after the project, one tab per role.
-herdr must be running.
+The agents run in a herdr workspace named after the project, one pane per role
+tiled in a 2x2 grid (specifier, coder / architect, QA). herdr must be running.
 
 ## Structure
 
