@@ -177,6 +177,36 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest launcher-refuses-a-protected-branch-unless-allowed
+  ;; Given a repo with a commit on develop
+  ;; When the launcher checks the branch
+  ;; Then it refuses main, master and develop, accepts an integration branch, honours
+  ;; SWARMFORGE_ALLOW_BRANCH=1, and leaves a repo without commits or a non-repo alone
+  (let [root (tmp-dir)
+        fresh (tmp-dir)
+        plain (tmp-dir)
+        check (fn [dir & [env]]
+                (run {:dir dir :ok? false :env env}
+                     (script "swarmforge.bb") "--test-branch-check" (str dir)))]
+    (try
+      (init-repo! root)
+      (doseq [branch ["develop" "main" "master"]]
+        (run {:dir root} "git" "checkout" "-q" "-B" branch)
+        (let [result (check root)]
+          (is (= 1 (:exit result)) branch)
+          (is (str/includes? (:err result) (str "Refusing to start on '" branch "'")) branch)
+          (is (str/includes? (:err result) "git switch -c swarm/<task>"))))
+      (is (= 0 (:exit (check root {"SWARMFORGE_ALLOW_BRANCH" "1"}))))
+      (run {:dir root} "git" "checkout" "-q" "-b" "swarm/r-030")
+      (is (str/includes? (:out (check root)) "branch ok"))
+      (run {:dir fresh} "git" "init" "-q" "-b" "main")
+      (is (= 0 (:exit (check fresh))))
+      (is (= 0 (:exit (check plain))))
+      (finally
+        (fs/delete-tree root)
+        (fs/delete-tree fresh)
+        (fs/delete-tree plain)))))
+
 (deftest swarmforge-launch-gives-each-role-a-pane-and-starts-its-agent
   ;; Given a claude coder on master and a claude cleaner
   ;; When the launcher starts the roles against herdr

@@ -777,10 +777,33 @@
   (println "  Disciplined agents build better software")
   (println reset))
 
+(def protected-branches #{"main" "master" "develop"})
+
+(defn current-branch [dir]
+  (let [result (process/sh {:continue true} "git" "-C" (str dir) "symbolic-ref" "--short" "-q" "HEAD")]
+    (when (zero? (:exit result))
+      (str/trim (:out result)))))
+
+(defn check-integration-branch!
+  "The master role commits and merges its results directly on the checked-out branch, so a
+   protected branch is refused. A repo without commits yet has nothing to protect."
+  [ctx]
+  (let [dir (:working-dir ctx)
+        branch (current-branch dir)]
+    (when (and branch
+               (protected-branches branch)
+               (sh-ok? "git" "-C" (str dir) "rev-parse" "--verify" "-q" "HEAD")
+               (not= "1" (System/getenv "SWARMFORGE_ALLOW_BRANCH")))
+      (fail! (str red "Error:" reset " Refusing to start on '" branch "'. The swarm's master role commits"
+                  " and merges its results directly on the checked-out branch.\n"
+                  "Start from an integration branch instead:  git switch -c swarm/<task>\n"
+                  "To run on '" branch "' anyway, set SWARMFORGE_ALLOW_BRANCH=1.")))))
+
 (defn run-main! [root]
   (check-herdr!)
   (check-dependency! "git")
   (check-dependency! "bb")
+  (check-integration-branch! (context root))
   (let [ctx (context root)]
     (initialize-git-repo! ctx)
     (ensure-runtime-git-excludes! ctx)
@@ -870,6 +893,7 @@
   (check-herdr!)
   (check-dependency! "git")
   (check-dependency! "bb")
+  (check-integration-branch! (context root))
   (let [ctx (context root)]
     (initialize-git-repo! ctx)
     (ensure-runtime-git-excludes! ctx)
@@ -886,6 +910,10 @@
       (start-handoff-daemon! ctx)
       (launch-roles! ctx)
       (announce-ready! ctx))))
+
+(defn test-branch-check! [root]
+  (check-integration-branch! (context root))
+  (println "branch ok"))
 
 (defn test-launch-roles! [root]
   (let [ctx (prepare-ctx (context root))]
@@ -945,6 +973,7 @@
   (case (first args)
     "--test-parse" (test-parse! (or (second args) (System/getProperty "user.dir")))
     "--test-required-helpers" (test-required-helpers!)
+    "--test-branch-check" (test-branch-check! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-plan" (test-launch-plan! (or (second args) (System/getProperty "user.dir")))
     "--test-start-order" (test-start-order! (or (second args) (System/getProperty "user.dir")))
     "--test-launch-roles" (test-launch-roles! (or (second args) (System/getProperty "user.dir")))

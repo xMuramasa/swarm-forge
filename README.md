@@ -85,6 +85,27 @@ lieutenant, and dashboard. `project-manager` also downloads the three pack
 branches into `packs/`; `lieutenant` carries its one template under
 `.swarmforge/project-pack/`.
 
+## Start on an integration branch
+
+The role on the `master` worktree (the specifier in `mini-forge`) has no worktree
+of its own: it works in your checkout, on whatever branch is checked out, and the
+finished work of every other role is merged into it. Anything the swarm commits
+lands on that branch. So start each swarm from a branch made for it, and merge
+that branch yourself when you have reviewed it:
+
+```sh
+git switch -c swarm/<task>
+./swarm
+# ...when the work is done and reviewed, open a PR from swarm/<task>
+```
+
+The other roles use their own worktrees under `.worktrees/`, on `swarmforge-<role>`
+branches created from that branch at startup.
+
+The launcher refuses to start on `main`, `master` or `develop` in a repo that
+already has commits, and says how to fix it. `SWARMFORGE_ALLOW_BRANCH=1 ./swarm`
+overrides that for one run. A repo without commits yet is not checked.
+
 ## Accounts
 
 A project runs on one billing account, chosen per project rather than per role.
