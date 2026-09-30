@@ -10,7 +10,7 @@ New Task → specifier → approval → coder → architect → QA → Done
 
 | Role | Model (in `swarmforge.conf`) | Owns |
 |---|---|---|
-| `specifier` | `opus` | Gherkin, end-to-end QA procedures, dashboard approval. |
+| `specifier` | `opus` | Gherkin and end-to-end QA procedures; the only role that talks to you, and its spec waits for your `./swarm approve`. |
 | `coder` | `sonnet` | TDD and unit tests, the acceptance pipeline, and the cleanup, coverage, and CRAP of the code it touches (the six-pack cleaner's local work). |
 | `architect` | `opus` | Boundaries and dependency direction, property tests, and language and Gherkin mutation, DRY, and CRAP gates (the six-pack hardender's work). |
 | `QA` | `sonnet` | Executable UI-level QA, independent final verification, narrow fixes. |
