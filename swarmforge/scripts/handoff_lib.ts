@@ -89,10 +89,12 @@ export const timestamp = () => new Date().toISOString();
 export const idTimestamp = () => timestamp().replace(/[-:]/g, "").replace(/\.\d+/, "");
 export const validPriority = (value: string) => /^[0-9][0-9]$/.test(value);
 
-/** Lines of a text the way Clojure's split-lines gives them: no empty last line. */
+/** Lines of a text the way Clojure's split-lines gives them (Java's String.split): trailing
+ *  empty lines are dropped, and text with no newline at all comes back whole, even "". */
 export function splitLines(text: string): string[] {
+  if (text === "") return [""];
   const lines = text.split(/\r?\n/);
-  if (lines[lines.length - 1] === "") lines.pop();
+  while (lines.length && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 
@@ -228,31 +230,53 @@ export function finishDone(): void {
   announceFollowUp();
 }
 
-const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** Next six-digit handoff sequence number, under a lock directory. */
-export function nextSequence(): string {
-  const dir = stateDir();
-  const seqFile = join(dir, "sequence");
-  const lockDir = join(dir, "sequence.lock");
-  mkdirSync(dir, { recursive: true });
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Run `f` holding an exclusive lock. The lock is a directory: creating it is atomic across
+ *  processes. One left behind by a dead process, or older than 30 s, is taken over. */
+export function withLockDir<T>(lock: string, f: () => T): T {
+  mkdirSync(dirname(lock), { recursive: true });
   for (;;) {
     try {
-      mkdirSync(lockDir);
+      mkdirSync(lock);
+      writeFileSync(join(lock, "pid"), String(process.pid));
       break;
     } catch {
-      sleep(50);
+      try {
+        const owner = Number(readFileSync(join(lock, "pid"), "utf8"));
+        if (!pidAlive(owner) || Date.now() - statSync(lock).mtimeMs > 30_000) rmSync(lock, { recursive: true, force: true });
+      } catch {
+        // the owner just released it or has not written its pid yet: try again
+      }
+      sleep(10);
     }
   }
   try {
+    return f();
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+/** Next six-digit handoff sequence number, under a lock. */
+export function nextSequence(dir = stateDir()): string {
+  const seqFile = join(dir, "sequence");
+  return withLockDir(join(dir, "sequence.lock"), () => {
     const last = existsSync(seqFile) ? readFileSync(seqFile, "utf8").trim() : "0";
     const next = (/^[0-9]+$/.test(last) ? Number(last) : 0) + 1;
     const formatted = String(next).padStart(6, "0");
     writeFileSync(seqFile, `${formatted}\n`);
     return formatted;
-  } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
+  });
 }
 
 const commands: Record<string, (args: string[]) => number | void> = {

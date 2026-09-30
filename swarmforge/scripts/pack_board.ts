@@ -2,12 +2,10 @@
 // The board of task cards (.swarmforge/board/tasks.tsv) and the archive of role panes.
 //   name <TAB> lane <TAB> created <TAB> updated <TAB> task-id <TAB> audit-count
 
-import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as herdr from "./herdr.ts";
-import { ExitError, projectRoot, timestamp } from "./handoff_lib.ts";
+import { ExitError, projectRoot, timestamp, withLockDir } from "./handoff_lib.ts";
 
 export const usageText = `Usage:
   pack_board.sh create --name <name> --lane <lane> [--root <dir>] [--text <text>]
@@ -41,45 +39,8 @@ const docFile = (root: string, name: string) => join(root, "tasks", `${name}.md`
 
 // -- lock ---------------------------------------------------------------------
 
-const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const staleAfterMs = 30_000;
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Run `f` holding an exclusive lock on the board. The lock is a directory: creating it is atomic
- *  across processes. One left behind by a dead process or older than 30 s is taken over. */
-export function withBoardLock<T>(root: string, f: () => T): T {
-  const dir = boardDir(root);
-  const lock = join(dir, "tasks.lock.d");
-  mkdirSync(dir, { recursive: true });
-  for (;;) {
-    try {
-      mkdirSync(lock);
-      writeFileSync(join(lock, "pid"), String(process.pid));
-      break;
-    } catch {
-      try {
-        const owner = Number(readFileSync(join(lock, "pid"), "utf8"));
-        if (!pidAlive(owner) || Date.now() - statSync(lock).mtimeMs > staleAfterMs) rmSync(lock, { recursive: true, force: true });
-      } catch {
-        // the owner just released it or has not written its pid yet: try again
-      }
-      sleep(10);
-    }
-  }
-  try {
-    return f();
-  } finally {
-    rmSync(lock, { recursive: true, force: true });
-  }
-}
+/** Run `f` holding an exclusive lock on the board. */
+export const withBoardLock = <T>(root: string, f: () => T): T => withLockDir(join(boardDir(root), "tasks.lock.d"), f);
 
 // -- rows ---------------------------------------------------------------------
 

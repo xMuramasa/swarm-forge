@@ -280,7 +280,7 @@
                          (:propagation row))))))
 
 (def required-helpers
-  ["handoff_lib.bb" "handoff_lib.ts" "swarm_handoff.sh" "swarm_handoff.bb"
+  ["handoff_lib.ts" "swarm_handoff.sh" "swarm_handoff.ts"
    "swarm_tool.sh" "swarm_tool.bb"
    "commit-msg-hook.sh" "commit_msg_hook.ts"
    "merge_and_process.sh" "merge_and_process.ts"
