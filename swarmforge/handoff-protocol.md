@@ -329,13 +329,13 @@ This prevents agents from sending corrupted or ambiguous SHA abbreviations.
 
 ## Handoff Daemon
 
-The daemon should be implemented in Babashka.
+The daemon is a TypeScript program run by bun (`handoffd.ts`).
 
 Rationale:
 
 - The service is mostly filesystem traversal, parsing, sorting, renaming, and
   subprocess calls.
-- Babashka keeps the implementation small and easier to change while the
+- One language for the whole runtime keeps it small and easy to change while the
   protocol is still evolving.
 
 Responsibilities:
@@ -599,7 +599,7 @@ or the removed send/receive/complete/resend wrapper scripts.
 
 ## Finalized Decisions
 
-- The handoff daemon is written in Babashka.
+- The handoff daemon is written in TypeScript and run by bun.
 - Git handoff commit abbreviations are exactly 10 hexadecimal characters.
 - `note` handoffs have no optional classification field.
 - Helper scripts do not provide recovery modes for ambiguous queue state.

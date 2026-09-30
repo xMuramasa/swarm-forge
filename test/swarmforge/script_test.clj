@@ -103,7 +103,7 @@
                        "window cleaner codex cleaner batch\n"))
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
-      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (str/includes? (:out result) "coder Coder"))
         (is (str/includes? (:out result) "cleaner Cleaner"))
         (is (str/includes? (:out result) "cleaner batch"))
@@ -121,7 +121,7 @@
                   (str "window coder codex master\n"
                        "window coder codex other\n"))
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
-      (let [result (run {:dir root :ok? false} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root :ok? false} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (= 1 (:exit result)))
         (is (str/includes? (:err result) "Duplicate role 'coder'")))
       (finally
@@ -138,7 +138,7 @@
       (write-file (fs/path root "swarmforge/swarmforge.conf")
                   "window-invisible specifier codex master\n")
       (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
-      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (str/includes? (:out result) "specifier"))
         (is (str/includes? (:out result) "invisible")))
       (finally
@@ -148,7 +148,7 @@
   ;; Given the launcher required-helpers list
   ;; When --test-required-helpers
   ;; Then swarmctl.sh and pack_board.sh are listed
-  (let [result (run {:dir repo-root} (script "swarmforge.bb") "--test-required-helpers")
+  (let [result (run {:dir repo-root} (script "swarmforge.ts") "--test-required-helpers")
         names (set (str/split-lines (str/trim (:out result))))]
     (is (contains? names "swarmctl.sh"))
     (is (contains? names "pack_board.sh"))))
@@ -168,7 +168,7 @@
       (write-pack-conf! root
                         (str "window-invisible specifier codex master\n"
                              "window coder codex coder\n"))
-      (let [out (:out (run {:dir root} (script "swarmforge.bb")
+      (let [out (:out (run {:dir root} (script "swarmforge.ts")
                            "--test-launch-plan" (str root)))]
         (is (str/includes? out "start-agent specifier"))
         (is (str/includes? out "start-agent coder")))
@@ -185,7 +185,7 @@
         plain (tmp-dir)
         check (fn [dir & [env]]
                 (run {:dir dir :ok? false :env env}
-                     (script "swarmforge.bb") "--test-branch-check" (str dir)))]
+                     (script "swarmforge.ts") "--test-branch-check" (str dir)))]
     (try
       (init-repo! root)
       (doseq [branch ["develop" "main" "master"]]
@@ -215,7 +215,7 @@
                         (str "window coder claude master\n"
                              "window cleaner claude cleaner\n"))
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
-      (let [launched (run {:dir root} (script "swarmforge.bb") "--test-launch-roles" (str root))
+      (let [launched (run {:dir root} (script "swarmforge.ts") "--test-launch-roles" (str root))
             calls (fake-herdr/calls root)
             starts (filter #(str/starts-with? % "agent start") calls)]
         (is (not (str/includes? (:out launched) "is not ready")))
@@ -245,7 +245,7 @@
       (write-file (fs/path root "swarmforge/swarmforge.conf")
                   "window coder codex coder\n")
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
-      (let [result (run {:dir root :ok? false} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root :ok? false} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (= 1 (:exit result)))
         (is (str/includes? (:err result) "master")))
       (finally
@@ -264,7 +264,7 @@
                        "window coder codex master\n"))
       (write-file (fs/path root "swarmforge/roles/specifier.prompt") "specifier\n")
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
-      (let [result (run {:dir root :ok? false} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root :ok? false} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (= 1 (:exit result)))
         (is (str/includes? (:err result) "master")))
       (finally
@@ -273,7 +273,7 @@
 (deftest swarmforge-sleep-prevention-can-be-disabled
   (let [result (run {:dir repo-root
                      :env {"SWARMFORGE_PREVENT_SLEEP" "0"}}
-                    (script "swarmforge.bb")
+                    (script "swarmforge.ts")
                     "--test-sleep-inhibitor-prefix")]
     (is (= "" (str/trim (:out result))))))
 
@@ -287,7 +287,7 @@
                        "window cleaner copilot cleaner batch --allow-all-tools\n"))
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
-      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))]
+      (let [result (run {:dir root} (script "swarmforge.ts") "--test-parse" (str root))]
         (is (str/includes? (:out result) "coder Coder"))
         (is (str/includes? (:out result) "task forward-only --yolo"))
         (is (str/includes? (:out result) "batch forward-only --allow-all-tools")))
@@ -311,7 +311,7 @@
       (write-file (fs/path root "swarmforge/roles/coder.prompt") "coder\n")
       (write-file (fs/path root "swarmforge/roles/refactorer.prompt") "refactorer\n")
       (write-file (fs/path root "swarmforge/roles/architect.prompt") "architect\n")
-      (let [result (run {:dir root} (script "swarmforge.bb") "--test-parse" (str root))
+      (let [result (run {:dir root} (script "swarmforge.ts") "--test-parse" (str root))
             out (:out result)]
         (is (zero? (:exit result)))
         (is (str/includes? out "specifier Specifier"))
@@ -349,7 +349,7 @@
   (let [root (tmp-dir)]
     (try
       (let [result (run {:dir root}
-                        (script "swarmforge.bb")
+                        (script "swarmforge.ts")
                         "--test-launch-command"
                         (str root)
                         "copilot"
@@ -364,7 +364,7 @@
   (let [root (tmp-dir)]
     (try
       (let [result (run {:dir root}
-                        (script "swarmforge.bb")
+                        (script "swarmforge.ts")
                         "--test-launch-command"
                         (str root)
                         "grok")
@@ -384,7 +384,7 @@
   (let [root (tmp-dir)]
     (try
       (let [command (:out (run {:dir root}
-                               (script "swarmforge.bb")
+                               (script "swarmforge.ts")
                                "--test-launch-command"
                                (str root)
                                "grok"))]
@@ -404,7 +404,7 @@
     (let [root (tmp-dir)]
       (try
         (let [command (:out (run {:dir root}
-                                 (script "swarmforge.bb")
+                                 (script "swarmforge.ts")
                                  "--test-launch-command"
                                  (str root)
                                  agent))]
@@ -416,7 +416,7 @@
   (let [root (tmp-dir)]
     (try
       (let [result (run {:dir root}
-                        (script "swarmforge.bb")
+                        (script "swarmforge.ts")
                         "--test-launch-command"
                         (str root)
                         "grok"
@@ -439,7 +439,7 @@
     (let [root (tmp-dir)]
       (try
         (let [command (:out (run {:dir root}
-                                 (script "swarmforge.bb")
+                                 (script "swarmforge.ts")
                                  "--test-launch-command"
                                  (str root)
                                  agent))]
@@ -454,7 +454,7 @@
   (let [root (tmp-dir)]
     (try
       (let [command (:out (run {:dir root}
-                               (script "swarmforge.bb")
+                               (script "swarmforge.ts")
                                "--test-launch-command"
                                (str root)
                                "codex"))]
@@ -475,7 +475,7 @@
                               "HOME" (str home)
                               "PATH" (System/getenv "PATH")
                               "GIT_CONFIG_NOSYSTEM" "1"}}
-             (script "swarmforge.bb")
+             (script "swarmforge.ts")
              "--test-ensure-codex-trust"
              wt))
       (let [cfg (slurp (str (fs/path home "config.toml")))
@@ -502,7 +502,7 @@
       (run {:dir root :env {"CODEX_HOME" (str home)
                             "PATH" (System/getenv "PATH")
                             "GIT_CONFIG_NOSYSTEM" "1"}}
-           (script "swarmforge.bb")
+           (script "swarmforge.ts")
            "--test-ensure-codex-trust"
            wt)
       (is (= original (slurp (str (fs/path home "config.toml")))))
@@ -523,7 +523,7 @@
       (run {:dir root :env {"CODEX_HOME" (str home)
                             "PATH" (System/getenv "PATH")
                             "GIT_CONFIG_NOSYSTEM" "1"}}
-           (script "swarmforge.bb")
+           (script "swarmforge.ts")
            "--test-ensure-codex-trust"
            wt)
       (let [cfg (slurp (str (fs/path home "config.toml")))]
@@ -699,7 +699,7 @@
       (write-file (fs/path root ".swarmforge/roles.tsv")
                   (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
       (run {:dir root}
-           (script "swarmforge.bb")
+           (script "swarmforge.ts")
            "--test-install-hooks"
            (str root))
       (write-file (fs/path root "spec.md") "hunt\n")
@@ -732,7 +732,7 @@
       (write-file (fs/path root ".swarmforge/roles.tsv")
                   (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
       (run {:dir root}
-           (script "swarmforge.bb")
+           (script "swarmforge.ts")
            "--test-install-hooks"
            (str root))
       (write-file (fs/path root "spec.md") "hunt\n")
@@ -1053,7 +1053,7 @@
         {:keys [env]} (account-fixture root)]
     (try
       (write-pack-conf! root "account personal\nwindow coder claude master\n")
-      (let [out (:out (run {:dir root :env env} (script "swarmforge.bb") "--test-parse" (str root)))]
+      (let [out (:out (run {:dir root :env env} (script "swarmforge.ts") "--test-parse" (str root)))]
         (is (str/includes? out "account personal")))
       (finally
         (fs/delete-tree root)))))
@@ -1064,7 +1064,7 @@
     (try
       (write-pack-conf! root "account personal\nwindow coder claude master\n")
       (let [out (:out (run {:dir root :env (assoc env "SWARMFORGE_ACCOUNT" "work")}
-                           (script "swarmforge.bb") "--test-parse" (str root)))]
+                           (script "swarmforge.ts") "--test-parse" (str root)))]
         (is (str/includes? out "account work"))
         (is (not (str/includes? out "account personal"))))
       (finally
@@ -1078,7 +1078,7 @@
         {:keys [env personal codex]} (account-fixture root)
         spec (fn [agent extra-env]
                (:out (run {:dir root :env (merge env extra-env)}
-                          (script "swarmforge.bb") "--test-launch-command" (str root) agent)))]
+                          (script "swarmforge.ts") "--test-launch-command" (str root) agent)))]
     (try
       (is (str/includes? (spec "claude" {"SWARMFORGE_ACCOUNT" "personal"})
                          (str "CLAUDE_CONFIG_DIR=" personal)))
@@ -1094,7 +1094,7 @@
         parse (fn [conf extra-env]
                 (write-pack-conf! root conf)
                 (run {:dir root :ok? false :env (merge env extra-env)}
-                     (script "swarmforge.bb") "--test-parse" (str root)))]
+                     (script "swarmforge.ts") "--test-parse" (str root)))]
     (try
       (let [result (parse "account nobody\nwindow coder claude master\n" {})]
         (is (= 1 (:exit result)))
@@ -1121,7 +1121,7 @@
     (try
       (write-pack-conf! root "account personal\nwindow coder claude master\nwindow cleaner claude cleaner\n")
       (write-file (fs/path root "swarmforge/roles/cleaner.prompt") "cleaner\n")
-      (run {:dir root :env env} (script "swarmforge.bb") "--test-launch-roles" (str root))
+      (run {:dir root :env env} (script "swarmforge.ts") "--test-launch-roles" (str root))
       (let [calls (fake-herdr/calls root)
             opens (filter #(re-find #"^(workspace create|pane split)" %) calls)]
         (is (= 2 (count opens)))
@@ -1134,7 +1134,7 @@
         home (fs/create-temp-dir {:prefix "codex-account."})
         wt (str (fs/absolutize root))]
     (try
-      (run {:dir root :env {"HOME" (str root)}} (script "swarmforge.bb")
+      (run {:dir root :env {"HOME" (str root)}} (script "swarmforge.ts")
            "--test-ensure-codex-trust" wt (str home))
       (is (str/includes? (slurp (str (fs/path home "config.toml")))
                          (str "[projects." (pr-str wt) "]")))

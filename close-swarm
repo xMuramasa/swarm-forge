@@ -20,10 +20,10 @@ if [[ ! -d "$PROJECT_ROOT/.swarmforge" ]]; then
 fi
 
 for candidate in "$SELF_DIR/swarmforge/scripts" "$SELF_DIR" "$PROJECT_ROOT/swarmforge/scripts"; do
-  if [[ -f "$candidate/swarmforge.bb" ]]; then
-    exec bb "$candidate/swarmforge.bb" --stop-project "$PROJECT_ROOT"
+  if [[ -f "$candidate/swarmforge.ts" ]]; then
+    exec bun "$candidate/swarmforge.ts" --stop-project "$PROJECT_ROOT"
   fi
 done
 
-echo "Could not find swarmforge.bb relative to $SELF_DIR or $PROJECT_ROOT." >&2
+echo "Could not find swarmforge.ts relative to $SELF_DIR or $PROJECT_ROOT." >&2
 exit 1

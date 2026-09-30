@@ -1,46 +1,17 @@
-{:paths ["test" "swarmforge/scripts"]
+{:paths ["test"]
  :tasks
- {test {:doc "Run the Clojure runtime tests and the bun tests of the swarm CLI"
+ {test {:doc "Run the Clojure black-box tests, then the bun tests"
         :task (do
                 (require 'clojure.test)
                 (require 'swarmforge.handoff-test)
                 (require 'swarmforge.script-test)
                 (require 'swarmforge.pack-ui-test)
-                (require 'swarmforge.coverage-in-process-test)
                 (let [{:keys [fail error]} (clojure.test/run-tests 'swarmforge.handoff-test
                                                                     'swarmforge.script-test
-                                                                    'swarmforge.pack-ui-test
-                                                                    'swarmforge.coverage-in-process-test)]
+                                                                    'swarmforge.pack-ui-test)]
                   (when (pos? (+ fail error))
                     (System/exit (+ fail error))))
                 (let [result (babashka.process/shell {:continue true} "bun" "test" "test/cli")]
                   (when-not (zero? (:exit result))
                     (System/exit (or (:exit result) 1))))
-                (System/exit 0))}
-  coverage:bb {:doc "Cover Babashka scripts with Cloverage"
-               :extra-deps {io.github.unclebob/crap4clj
-                            {:git/url "https://github.com/unclebob/crap4clj.git"
-                             :git/sha "e068673a852a8142323ac680fa3366de65bc2227"}
-                            cloverage/cloverage
-                            {:git/url "https://github.com/cloverage/cloverage.git"
-                             :git/sha "61e3cac426e9907a9dd01c37597f85c71a57ff90"
-                             :deps/root "cloverage"}}
-               :requires ([crap4clj.bb-coverage :as coverage])
-               :task (apply coverage/-main
-                            "-p" "swarmforge/scripts"
-                            "-s" "test"
-                            "--lcov"
-                            "--no-html"
-                            "--no-text"
-                            "--no-emma-xml"
-                            "--test-ns-regex" "swarmforge\\.coverage-in-process-test"
-                            *command-line-args*)}
-  crap {:doc "Run crap4clj on Babashka scripts"
-        :extra-deps {io.github.unclebob/crap4clj
-                     {:git/url "https://github.com/unclebob/crap4clj.git"
-                      :git/sha "e068673a852a8142323ac680fa3366de65bc2227"}}
-        :requires ([crap4clj.core :as core])
-        :task (apply core/-main
-                     "--source-root" "swarmforge/scripts"
-                     "--coverage-command" "bb coverage:bb"
-                     *command-line-args*)}}}
+                (System/exit 0))}}}

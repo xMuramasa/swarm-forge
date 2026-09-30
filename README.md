@@ -27,8 +27,8 @@ Composition); add one to the `case` in `get-swarm-forge` to install it.
 
 - `zsh`, `git`
 - [`herdr`](https://herdr.dev/), running (the operator watches the swarm in its TUI)
-- [`bun`](https://bun.sh/), which runs the operator commands
-- Babashka (`bb`), which runs the rest of the runtime
+- [`bun`](https://bun.sh/), which runs the whole runtime (TypeScript, no build step)
+- Optional: Babashka (`bb`), only for unclebob's Gherkin acceptance tools (`gherkin-parser` and friends), which are Babashka programs
 - Claude Code (`claude`), or another supported backend: `codex`, `grok`, `copilot`
 
 ## Install the helper
@@ -205,19 +205,19 @@ belong on `main` first. Pack branches own only their configuration, local
 constitution additions, role prompts, and launcher.
 
 Do not pin prompt prose with automated tests. Test observable runtime behavior
-instead. Run the tests with `bb test`: the Clojure runtime tests, then
-`bun test test/cli` for the operator commands.
+instead. Run the tests with `bun test test/cli`. The older black-box tests are Clojure and run with
+`bb test`.
 
 ## Runtime components and generated state
 
 | Component | Responsibility |
 |---|---|
-| `swarmforge.sh` / `swarmforge.bb` | Parse configuration, create worktrees, synchronize managed files, and launch herdr agents. `swarmforge.sh` also routes the operator commands to `swarmctl.ts`. |
+| `swarmforge.sh` / `swarmforge.ts` | Parse configuration, create worktrees, synchronize managed files, and launch herdr agents. `swarmforge.sh` also routes the operator commands to `swarmctl.ts`. |
 | `swarmctl.ts` | The operator commands: `status`, `task new`, `approve`, `reject`. Runs on bun. |
 | `swarm_handoff.*`, `ready_for_next.*`, `done_with_current.*` | Create, accept, merge, audit, and complete durable work items. |
 | `handoffd.*` | Deliver queued handoffs, hold the specifier's spec for approval, and wake receiving agents. |
 | `pack_board.*` | Persist the board's task cards and archive role panes. |
-| `herdr.bb` | The one wrapper over the herdr CLI: workspaces, panes, agents, prompts, reads. |
+| `herdr.ts` | The one wrapper over the herdr CLI: workspaces, panes, agents, prompts, reads. |
 | `crap.sh`, `swarm_tool.*` | Quality tools for the agents: CRAP from lizard plus lcov coverage, and installers for the language tools. |
 | `close-swarm` | Archive role panes, stop the daemon, and close the project's herdr workspace. |
 
