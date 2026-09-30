@@ -936,7 +936,7 @@
         base (tmp-dir)
         pack (tmp-dir)]
     (try
-      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
+      (doseq [name ["swarmforge.sh" "handoffd.ts" "done_with_current.sh"]]
         (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
       (doseq [article ["engineering" "workflow" "handoffs"]]
         (write-file (fs/path base "swarmforge/constitution/articles" (str article ".prompt"))
@@ -953,7 +953,7 @@
                         (str (fs/path repo-root "get-swarm-forge"))
                         "mini-forge")]
         (is (zero? (:exit result)) (:err result))
-        (is (fs/exists? (fs/path project "swarmforge/scripts/handoffd.bb")))
+        (is (fs/exists? (fs/path project "swarmforge/scripts/handoffd.ts")))
         (is (= "MAIN-engineering\n" (slurp (str (fs/path project "swarmforge/constitution/articles/engineering.prompt")))))
         (is (= "PACK-PROJECT\n" (slurp (str (fs/path project "swarmforge/constitution/articles/project.prompt")))))
         (is (= "#!/bin/sh\necho pack-swarm\n" (slurp (str (fs/path project "swarm")))))
@@ -977,7 +977,7 @@
         prompt-of (fn [project]
                     (slurp (str (fs/path project "swarmforge/constitution/articles/project.prompt"))))]
     (try
-      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
+      (doseq [name ["swarmforge.sh" "handoffd.ts" "done_with_current.sh"]]
         (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
       (doseq [article ["engineering" "workflow" "handoffs"]]
         (write-file (fs/path base "swarmforge/constitution/articles" (str article ".prompt")) "x\n"))

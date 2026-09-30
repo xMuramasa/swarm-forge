@@ -181,7 +181,7 @@ verify_pack_roles
 for required in \
   swarm \
   swarmforge/scripts/swarmforge.sh \
-  swarmforge/scripts/handoffd.bb \
+  swarmforge/scripts/handoffd.ts \
   swarmforge/scripts/done_with_current.sh \
   swarmforge/constitution/articles/handoffs.prompt \
   swarmforge/constitution/articles/workflow.prompt \

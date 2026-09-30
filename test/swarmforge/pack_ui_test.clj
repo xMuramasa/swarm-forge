@@ -201,7 +201,7 @@
 (defn handoffd-once
   ([root] (handoffd-once root nil))
   ([root env]
-   (run {:dir root :env env} "bb" (script "handoffd.bb") "--once" (str root))))
+   (run {:dir root :env env} (script "handoffd.ts") "--once" (str root))))
 
 (defn pane-path [root role task]
   (fs/path root ".swarmforge/sessions" role task "pane.txt"))

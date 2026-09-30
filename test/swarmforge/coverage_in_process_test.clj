@@ -4,7 +4,6 @@
             [clojure.test :refer [deftest is]]
             [crap]
             [handoff-lib]
-            [handoffd]
             [herdr]
             [swarm-handoff]
             [swarm-tool]
@@ -70,22 +69,6 @@
         (is (= "note" (get headers "type")))
         (is (= "cleaner" (get headers "to")))
         (is (= "hello" (get headers "message"))))
-      (finally
-        (fs/delete-tree root)))))
-
-(deftest handoffd-parses-recipients-and-messages
-  (is (= ["coder" "cleaner"] (handoffd/recipient-list {"to" "coder, cleaner"})))
-  (is (true? (handoffd/non-forwarding? {"non-forwarding" "true"})))
-  (is (true? (handoffd/phantom-sender? "(New Task)")))
-  (is (false? (handoffd/phantom-sender? "coder")))
-  (let [root (tmp-dir)
-        file (fs/path root "mail.handoff")]
-    (try
-      (spit (str file) "from: coder\nto: cleaner\ntype: note\n\npayload\n")
-      (let [message (handoffd/parse-message file)]
-        (is (= "coder" (get-in message [:headers "from"])))
-        (is (= "payload\n" (:body message)))
-        (is (re-find #"from: coder" (handoffd/render-message (:headers message) (:body message)))))
       (finally
         (fs/delete-tree root)))))
 
@@ -226,11 +209,6 @@
     (is (some #(re-find #"empty recipient" %) errors))
     (is (some #(re-find #"underscores" %) errors))
     (is (some #(re-find #"Duplicate recipient 'receiver'" %) errors))))
-
-(deftest handoffd-skips-board-update-without-board
-  (is (nil? (handoffd/update-board! {} {"type" "note"})))
-  (is (false? (handoffd/non-forwarding? {})))
-  (is (nil? (handoffd/recipient-list {}))))
 
 (deftest swarm-tool-usage
   (is (fn? swarm-tool/-main)))

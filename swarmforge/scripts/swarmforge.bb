@@ -290,7 +290,7 @@
    "done_with_current_task.sh" "done_with_current_task.ts"
    "ready_for_next_batch.sh" "ready_for_next_batch.ts"
    "done_with_current_batch.sh" "done_with_current_batch.ts"
-   "handoffd.bb" "stop_handoff_daemon.ts" "stop_handoff_daemon.sh"
+   "handoffd.ts" "stop_handoff_daemon.ts" "stop_handoff_daemon.sh"
    "swarmforge.sh" "swarmforge.bb"
    "pack_board.sh" "pack_board.ts"
    "swarmctl.sh" "swarmctl.ts"])
@@ -616,7 +616,7 @@
 (defn start-handoff-daemon! [ctx]
   (fs/delete-if-exists (fs/path (:daemon-dir ctx) "stop"))
   (let [command (into (vec (sleep-inhibitor-prefix))
-                      [(str (fs/path (:script-dir ctx) "handoffd.bb"))
+                      [(str (fs/path (:script-dir ctx) "handoffd.ts"))
                        (str (:working-dir ctx))])]
     (process/process command
                      {:out (str (:handoff-daemon-log ctx))

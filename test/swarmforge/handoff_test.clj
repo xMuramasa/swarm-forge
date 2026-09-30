@@ -582,7 +582,7 @@
                    :task "task-two"
                    :body "next task"})
     (let [result (run {:dir root}
-                      "bb" (script "handoffd.bb") "--once" (str root))
+                      (script "handoffd.ts") "--once" (str root))
           woken (set (map first (fake-herdr/prompts root)))]
       (is (zero? (:exit result)))
       (is (fs/exists? (fs/path receiver ".swarmforge/handoffs/inbox/new/50_approved.handoff")))
@@ -1004,7 +1004,7 @@
                 (str "coder\tmaster\t" root "\tsession\tCoder\tcodex\ttask\n"))
     (run {:dir root :ok? false}
          "sh" "-c"
-         (str "bb " (script "handoffd.bb") " " root " >/dev/null 2>&1 &"))
+         (str (script "handoffd.ts") " " root " >/dev/null 2>&1 &"))
     (Thread/sleep 1500)
     (let [pid-file (fs/path root ".swarmforge/daemon/handoffd.pid")]
       (is (fs/exists? pid-file))
