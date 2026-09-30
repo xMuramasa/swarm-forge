@@ -584,6 +584,22 @@
       (finally
         (fs/delete-tree root)))))
 
+(deftest swarm-tool-ensure-installs-exec-wrappers-for-jscpd-and-lizard
+  ;; Given a pack project
+  ;; When ensure runs for jscpd and lizard
+  ;; Then each gets a wrapper that runs it through pnpm dlx or uvx, and require then succeeds
+  (let [root (tmp-dir)]
+    (try
+      (write-file (fs/path root ".swarmforge/roles.tsv")
+                  (format "specifier\tmaster\t%s\tsession\tSpecifier\tcodex\ttask\n" root))
+      (doseq [[tool command] [["jscpd" "exec pnpm dlx jscpd \"$@\""]
+                              ["lizard" "exec uvx lizard \"$@\""]]]
+        (run {:dir root} (script "swarm_tool.sh") "ensure" tool)
+        (is (str/includes? (slurp (str (fs/path root ".swarmforge/bin" tool))) command) tool)
+        (is (str/includes? (:out (run {:dir root} (script "swarm_tool.sh") "require" tool)) "OK:") tool))
+      (finally
+        (fs/delete-tree root)))))
+
 (deftest swarm-tool-ensure-cloverage-invokes-cloverage
   ;; Given a pack project
   ;; When swarm_tool.sh ensure cloverage
@@ -998,6 +1014,50 @@
         (fs/delete-tree base)
         (fs/delete-tree pack)))))
 
+(deftest get-swarm-forge-writes-the-project-language-into-the-constitution
+  ;; Given a pack whose project.prompt says the language is not set
+  ;; When get-swarm-forge mini-forge typescript runs
+  ;; Then that line names TypeScript; an unknown language fails; no language warns
+  (let [base (tmp-dir)
+        pack (tmp-dir)
+        install (fn [project & args]
+                  (apply run {:dir project :ok? false
+                              :env {"SWARMFORGE_BASE_DIR" (str base)
+                                    "SWARMFORGE_PACKS_DIR" (str pack)}}
+                         (str (fs/path repo-root "get-swarm-forge")) "mini-forge" args))
+        prompt-of (fn [project]
+                    (slurp (str (fs/path project "swarmforge/constitution/articles/project.prompt"))))]
+    (try
+      (doseq [name ["swarmforge.sh" "handoffd.bb" "done_with_current.sh"]]
+        (write-file (fs/path base "swarmforge/scripts" name) (str name "\n")))
+      (doseq [article ["engineering" "workflow" "handoffs"]]
+        (write-file (fs/path base "swarmforge/constitution/articles" (str article ".prompt")) "x\n"))
+      (write-file (fs/path pack "swarm") "#!/bin/sh\n")
+      (write-file (fs/path pack "swarmforge/swarmforge.conf") "window specifier claude master\n")
+      (write-file (fs/path pack "swarmforge/constitution.prompt") "C\n")
+      (write-file (fs/path pack "swarmforge/roles/specifier.prompt") "specifier\n")
+      (write-file (fs/path pack "swarmforge/constitution/articles/project.prompt")
+                  "# Project Rules\n- Project language: not set.\n- Keep state local.\n")
+      (let [typed (tmp-dir) untyped (tmp-dir) bad (tmp-dir)]
+        (try
+          (is (zero? (:exit (install typed "typescript"))))
+          (is (str/includes? (prompt-of typed) "- Project language: TypeScript.\n"))
+          (is (str/includes? (prompt-of typed) "- Keep state local."))
+          (let [result (install untyped)]
+            (is (zero? (:exit result)))
+            (is (str/includes? (:err result) "project language is not set"))
+            (is (str/includes? (prompt-of untyped) "not set")))
+          (let [result (install bad "cobol")]
+            (is (= 1 (:exit result)))
+            (is (str/includes? (:err result) "unknown language 'cobol'")))
+          (finally
+            (fs/delete-tree typed)
+            (fs/delete-tree untyped)
+            (fs/delete-tree bad))))
+      (finally
+        (fs/delete-tree base)
+        (fs/delete-tree pack)))))
+
 (deftest get-swarm-forge-copies-only-swarmforge-owned-paths
   (let [host (tmp-dir)
         base (tmp-dir)
@@ -1053,6 +1113,31 @@
         (fs/delete-tree host)
         (fs/delete-tree base)
         (fs/delete-tree packs)))))
+
+(deftest crap-script-fails-when-a-function-is-over-the-threshold
+  ;; Given a fake lizard and a coverage report where classify is half covered (CRAP 8.1)
+  ;; When crap.sh runs with thresholds either side of that
+  ;; Then it exits 1 and names the function above the threshold, 0 below it
+  (let [root (tmp-dir)
+        bin (fs/path root "bin")]
+    (try
+      (write-file (fs/path bin "lizard")
+                  (str "#!/bin/sh\n"
+                       "printf '%s\\n' '13,5,60,1,14,\"classify@1-14@src/c.ts\",\"src/c.ts\",\"classify\",\"classify ( n )\",1,14'\n"))
+      (fs/set-posix-file-permissions (fs/path bin "lizard") "rwxr-xr-x")
+      (write-file (fs/path root "cov.lcov")
+                  "SF:src/c.ts\nDA:2,2\nDA:3,1\nDA:6,0\nDA:7,0\nend_of_record\n")
+      (let [crap (fn [threshold]
+                   (run {:dir root :ok? false :env {"PATH" (str bin ":" (System/getenv "PATH"))}}
+                        (script "crap.sh") "--lcov" "cov.lcov" "--threshold" threshold "src/c.ts"))
+            strict (crap "5")
+            lenient (crap "10")]
+        (is (= 1 (:exit strict)))
+        (is (str/includes? (:out strict) "classify"))
+        (is (= 0 (:exit lenient)))
+        (is (str/includes? (:out lenient) "0 over CRAP")))
+      (finally
+        (fs/delete-tree root)))))
 
 (defn account-fixture
   "Two account dirs and a registry file. Returns the dirs and the env that points at the registry."

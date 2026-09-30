@@ -5,8 +5,10 @@ default_repo_url="https://github.com/xMuramasa/swarm-forge"
 pack_names=(two-pack four-pack six-pack)
 
 usage() {
-  echo "usage: get-swarm-forge <mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant>" >&2
+  echo "usage: get-swarm-forge <mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant> [language]" >&2
   echo "  Packs (mini-forge, two-pack, four-pack, six-pack) compose into the current directory." >&2
+  echo "  language (packs only): typescript, python, go, clojure, java, babashka. Written into the" >&2
+  echo "  project's constitution so the agents pick that language's tools." >&2
   echo "  project-manager and lieutenant are forges (projects/, dashboard, host lieutenant)." >&2
 }
 
@@ -15,12 +17,13 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-if [[ $# -ne 1 || "$1" == -* ]]; then
+if [[ $# -lt 1 || $# -gt 2 || "$1" == -* ]]; then
   usage
   exit 1
 fi
 
 product="$1"
+language="${2:-}"
 case "$product" in
   mini-forge|two-pack|four-pack|six-pack|project-manager|lieutenant) ;;
   *)
@@ -29,6 +32,26 @@ case "$product" in
     exit 1
     ;;
 esac
+
+language_name=""
+if [[ -n "$language" ]]; then
+  case "${language:l}" in
+    typescript) language_name="TypeScript" ;;
+    python) language_name="Python" ;;
+    go) language_name="Go" ;;
+    clojure) language_name="Clojure" ;;
+    java) language_name="Java" ;;
+    babashka) language_name="Babashka" ;;
+    *)
+      echo "get-swarm-forge: unknown language '$language' (typescript, python, go, clojure, java, babashka)" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$product" == project-manager || "$product" == lieutenant ]]; then
+    echo "get-swarm-forge: a language applies to packs, not to the '$product' forge" >&2
+    exit 1
+  fi
+fi
 
 repo_url="${SWARMFORGE_REPO_URL:-$default_repo_url}"
 tmp_dir="$(mktemp -d)"
@@ -76,6 +99,18 @@ download_branch() {
   echo "get-swarm-forge: branch '$ref' was not found at ${repo_url}/archive/refs/heads/${ref}.tar.gz" >&2
   echo "Push the branch, or set SWARMFORGE_GIT_DIR to a local checkout that has it." >&2
   exit 1
+}
+
+set_project_language() {
+  local project_prompt="swarmforge/constitution/articles/project.prompt"
+  if [[ -n "$language_name" ]]; then
+    [[ -f "$project_prompt" ]] || fail_missing "$project_prompt"
+    sed -i.bak "s/^- Project language: .*/- Project language: ${language_name}./" "$project_prompt"
+    rm -f "$project_prompt.bak"
+  elif [[ -f "$project_prompt" ]] && grep -q "^- Project language: not set" "$project_prompt"; then
+    echo "get-swarm-forge: the project language is not set. Rerun with a language (get-swarm-forge $product typescript)" >&2
+    echo "  or edit the 'Project language' line in $project_prompt." >&2
+  fi
 }
 
 fail_missing() {
@@ -220,6 +255,7 @@ if [[ "$product" == mini-forge || "$product" == two-pack || "$product" == four-p
   [[ -n "$pack_src" && -d "$pack_src" ]] || fail_missing "pack $product"
   copy_shared_scripts_and_articles "$host_dir"
   copy_pack_template "$pack_src" "."
+  set_project_language
   [[ -f swarm ]] || fail_missing "swarm from pack $product"
   chmod +x swarm
   verify_pack_roles "."

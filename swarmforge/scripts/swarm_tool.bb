@@ -29,6 +29,10 @@
    "crap4go" {:source "github.com/unclebob/crap4go" :bb-task "crap4go"}
    "dry4go" {:source "github.com/unclebob/dry4go" :bb-task "dry4go"}
    "mutate4go" {:source "github.com/unclebob/mutate4go" :bb-task "mutate4go"}
+   ;; Language-agnostic tools run on demand: jscpd finds duplicated code, lizard measures
+   ;; complexity (crap.sh combines it with coverage).
+   "jscpd" {:exec "pnpm dlx jscpd"}
+   "lizard" {:exec "uvx lizard"}
    "crap4java" {:source "github.com/unclebob/crap4java" :bb-task "crap4java"}
    "dry4java" {:source "github.com/unclebob/dry4java" :bb-task "dry4java"}
    "mutate4java" {:source "github.com/unclebob/mutate4java" :bb-task "mutate4java"}})
@@ -190,14 +194,18 @@
           (when (seq args) (str " " args))
           " \"$@\"\n"))))
 
+(defn write-exec-wrapper! [root tool command]
+  (write-wrapper! (wrapper-path root tool) (str "exec " command " \"$@\"\n")))
+
 (defn install-one! [tool]
   (let [spec (tool-spec tool)
         root (project-root)
         name (canonical-tool tool)
-        target (if-let [bb-task (:bb-task spec)]
-                 (write-bb-wrapper! root name bb-task
-                                    (ensure-source! root (:source spec)))
-                 (write-mvn-wrapper! root name spec))]
+        target (cond
+                 (:exec spec) (write-exec-wrapper! root name (:exec spec))
+                 (:bb-task spec) (write-bb-wrapper! root name (:bb-task spec)
+                                                    (ensure-source! root (:source spec)))
+                 :else (write-mvn-wrapper! root name spec))]
     (println "INSTALLED:" name (str target))))
 
 (defn ensure-tool! [tool]

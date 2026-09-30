@@ -8,6 +8,9 @@
   - Go: install with `go install`; mutation `github.com/unclebob/mutate4go`, CRAP `github.com/unclebob/crap4go`, DRY `github.com/unclebob/dry4go`.
   - Clojure: install with Clojure CLI/deps.edn; mutation `github.com/unclebob/clj-mutate`, CRAP `github.com/unclebob/crap4clj`, DRY `github.com/unclebob/dry4clj`.
   - Java: install with Maven (`mvn`); mutation `github.com/unclebob/mutate4java`, CRAP `github.com/unclebob/crap4java`, DRY `github.com/unclebob/dry4java`.
+  - TypeScript (React, React Native, NestJS): mutation StrykerJS, CRAP `crap.sh` (lizard plus lcov coverage), DRY `jscpd`. See TypeScript Defaults.
+  - Python (Django): mutation `mutmut`, CRAP `crap.sh` (lizard plus lcov coverage), DRY `jscpd`. See Python Defaults.
+- The TypeScript and Python tools come from their package registries, not from GitHub clones: use the latest release through the project's package manager.
 
 ## Language Defaults
 - For Clojure projects, prefer Babashka where possible.
@@ -15,6 +18,29 @@
 - Install Speclj with `swarm_tool.sh require speclj`. If missing, `swarm_tool.sh ensure speclj`.
 - If a Speclj spec file changed, run `swarm_tool.sh require speclj-structure-check` (ensure if missing) and check the spec file before running tests.
 - For Java projects, avoid using Maven to run tests; build dedicated test runners and run those instead.
+
+## TypeScript Defaults (React, React Native, NestJS)
+- Use the package manager the project declares in `packageManager` (pnpm). Run project tools with `pnpm exec`. Do not use npm, yarn, or bun.
+- Tests run with the project's runner (vitest or jest). React Native tests use jest with React Native Testing Library.
+- Coverage for CRAP: run the tests with lcov output, e.g. `pnpm exec vitest run --coverage --coverage.reporter=lcov` (needs `@vitest/coverage-v8`; add it with `pnpm add -D`) or jest with `--coverage --coverageReporters=lcov`. That writes `coverage/lcov.info`. Keep `coverage/` out of git.
+- CRAP: `swarm_tool.sh require lizard` (ensure if missing), then `crap.sh --lcov coverage/lcov.info <changed source files>`. It lists each function over the threshold and exits 1 when there are any. Pass source files, not tests.
+- DRY: `swarm_tool.sh require jscpd` (ensure if missing), then `jscpd <source dirs> --min-lines 5 --min-tokens 50`. Reduce the duplication it reports where reasonable.
+- Mutation: StrykerJS, one file at a time. If `pnpm exec stryker --version` fails, `pnpm add -D @stryker-mutator/core @stryker-mutator/vitest-runner` (or `@stryker-mutator/jest-runner`).
+  - `stryker.config.json` must name the runner plugin: pnpm's strict `node_modules` hides it from Stryker's auto-discovery, and without it every run fails with "Cannot find TestRunner plugin". Example: `{"testRunner": "vitest", "plugins": ["@stryker-mutator/vitest-runner"], "reporters": ["clear-text"], "incremental": true, "incrementalFile": ".stryker/incremental.json", "coverageAnalysis": "perTest", "thresholds": {"high": 80, "low": 60, "break": 80}}`.
+  - Run `pnpm exec stryker run --mutate <file>`. Incremental mode is the differential run: unchanged mutants are reused from `.stryker/incremental.json`. Commit that file so the manifest forwards with handoffs; never hand-edit it. Keep `.stryker-tmp/` out of git.
+  - `thresholds.break` makes the run exit 1 when the score is under it. Kill survivors and cover `NoCoverage` mutants until it passes.
+- React Native mutation runs are slow: mutate only changed files.
+
+## Python Defaults (Django)
+- Use `uv`: add tools with `uv add --dev`, run them with `uv run`, and run one-off tools with `uvx`. Do not use pip.
+- Tests run with pytest (plus pytest-django for Django).
+- Coverage for CRAP: `uv run pytest --cov=<source dir> --cov-report=lcov:coverage.lcov` (needs `pytest-cov`). Keep `coverage.lcov` out of git.
+- CRAP: `swarm_tool.sh require lizard` (ensure if missing), then `crap.sh --lcov coverage.lcov <changed source files>`.
+- DRY: `swarm_tool.sh require jscpd` (ensure if missing), then `jscpd <source dirs> --min-lines 5 --min-tokens 50`.
+- Mutation: `uv add --dev mutmut`, then configure `[tool.mutmut]` in `pyproject.toml` with `source_paths = ["<file or dir>"]` and `pytest_add_cli_args_test_selection = ["tests/"]`. The older `paths_to_mutate` and `tests_dir` names are deprecated.
+  - `uv run mutmut run` caches results in `mutants/`, so a rerun only redoes changed code: that is the differential run. Keep `mutants/` out of git.
+  - `uv run mutmut results` lists survivors. `uv run mutmut export-cicd-stats` writes `mutants/mutmut-cicd-stats.json` with `killed`, `survived`, and `total`.
+  - mutmut exits 0 even with survivors, so read the stats. Kill the survivors before handoff.
 
 ## Design And Testability
 - Work in small, reviewable increments.
@@ -50,7 +76,7 @@
 - Run the relevant local verification command before handoff whenever the project has one.
 
 ## Guardrails
-- Do not invent project-local CRAP, DRY, mutation, or coverage proxies. Install and run the constitution tools (`crap4clj` with cloverage, `dry4clj`, `clj-mutate`, speclj, or the language table). Do not treat a homegrown `bb crap` / `bb coverage` / `bb mutation-count` task as those tools.
+- Do not invent project-local CRAP, DRY, mutation, or coverage proxies. Install and run the constitution tools (`crap4clj` with cloverage, `dry4clj`, `clj-mutate`, speclj, `crap.sh`, `jscpd`, StrykerJS, mutmut, or the language table). Do not treat a homegrown `bb crap` / `bb coverage` / `bb mutation-count` task as those tools.
 - Do not edit mutation testing or Gherkin acceptance mutation manifests by hand; allow approved mutation tools to update those manifests as part of their normal runs.
 - Do not commit unrelated local changes or generated artifacts unless required for the task.
 - Before relying on an unfamiliar command, inspect local help or project documentation.
