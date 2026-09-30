@@ -7,6 +7,9 @@ import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { BoardError, createCard, incrementAudit, newTaskId } from "./pack_board.ts";
+
+export { newTaskId };
 
 const run = promisify(execFile);
 
@@ -251,7 +254,13 @@ export async function reject(root: string, ref: string, comments: string): Promi
   const approval = findApproval(root, ref);
   dropApproval(root, approval.id);
   const card = readCards(root).find((c) => c.id === approval.taskId || c.name === approval.task);
-  if (card) await run(join(scriptDir, "pack_board.sh"), ["increment-audit", "--task-id", card.id, "--root", root]).catch(() => undefined);
+  if (card) {
+    try {
+      incrementAudit(root, card.id);
+    } catch {
+      // the card is gone: the spec is still discarded
+    }
+  }
   const master = masterRole(readRoles(root));
   const warning = await prompt(
     master.agent,
@@ -263,13 +272,7 @@ export async function reject(root: string, ref: string, comments: string): Promi
 
 // -- new task -------------------------------------------------------------------
 
-const slugId = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "task";
 const slugUnderscore = (text: string) => text.replace(/[^A-Za-z0-9]+/g, "_");
-
-export function newTaskId(name: string, now = new Date()): string {
-  const stamp = now.toISOString().replace(/[-:]/g, "").replace(".", "").replace("Z", "000Z");
-  return `${stamp}-${slugId(name)}`;
-}
 
 export function noteContent(taskId: string, name: string, to: string, text: string, now = new Date()): { file: string; content: string } {
   const iso = now.toISOString();
@@ -288,10 +291,10 @@ export async function createTask(root: string, name: string, text: string): Prom
   const master = masterRole(readRoles(root));
   const taskId = newTaskId(name);
   try {
-    await run(join(scriptDir, "pack_board.sh"), ["create", "--name", name, "--lane", master.role, "--task-id", taskId, "--text", text, "--root", root]);
+    createCard(root, name, master.role, taskId, text);
   } catch (e) {
-    const err = e as { stderr?: string; stdout?: string };
-    throw new CliError((err.stderr || err.stdout || String(e)).trim());
+    if (e instanceof BoardError) throw new CliError(e.message);
+    throw e;
   }
   const note = noteContent(taskId, name, master.role, text);
   const outbox = state(root, "handoffs", "outbox");
@@ -301,8 +304,6 @@ export async function createTask(root: string, name: string, text: string): Prom
 }
 
 // -- cli --------------------------------------------------------------------------
-
-const scriptDir = dirname(import.meta.path);
 
 const usage = `Usage: swarm <command>
   status [--json]                    roles, tasks and what is waiting for you

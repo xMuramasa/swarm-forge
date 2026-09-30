@@ -292,7 +292,7 @@
    "done_with_current_batch.sh" "done_with_current_batch.ts"
    "handoffd.bb" "stop_handoff_daemon.ts" "stop_handoff_daemon.sh"
    "swarmforge.sh" "swarmforge.bb"
-   "pack_board.sh" "pack_board.bb"
+   "pack_board.sh" "pack_board.ts"
    "swarmctl.sh" "swarmctl.ts"])
 
 (defn check-helper-scripts! [ctx]

@@ -6,7 +6,6 @@
             [handoff-lib]
             [handoffd]
             [herdr]
-            [pack-board]
             [swarm-handoff]
             [swarm-tool]
             [swarmforge]))
@@ -73,10 +72,6 @@
         (is (= "hello" (get headers "message"))))
       (finally
         (fs/delete-tree root)))))
-
-(deftest pack-board-parses-flags
-  (is (= {:positional ["list"] :root "/tmp/root"}
-         (pack-board/parse-args ["list" "--root" "/tmp/root"]))))
 
 (deftest handoffd-parses-recipients-and-messages
   (is (= ["coder" "cleaner"] (handoffd/recipient-list {"to" "coder, cleaner"})))
@@ -231,12 +226,6 @@
     (is (some #(re-find #"empty recipient" %) errors))
     (is (some #(re-find #"underscores" %) errors))
     (is (some #(re-find #"Duplicate recipient 'receiver'" %) errors))))
-
-(deftest pack-board-helpers
-  (is (= "hello" (pack-board/slug "Hello!")))
-  (is (= 3 (pack-board/parse-count "3")))
-  (is (= 0 (pack-board/parse-count "x")))
-  (is (re-find #"\tlane2\t" (pack-board/rewrite-lane "n\tlane1\tc\tu\tid\t0" "n" "lane2"))))
 
 (deftest handoffd-skips-board-update-without-board
   (is (nil? (handoffd/update-board! {} {"type" "note"})))
