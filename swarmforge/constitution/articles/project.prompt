@@ -2,7 +2,8 @@
 
 ## Project Shape
 - This project is configured for SwarmForge with four Claude-backed agents: specifier, coder, architect, and QA.
-- Project language: Babashka.
+- Project language: not set.
+- If the project language is not set, ask the operator with `pack_dashboard_request.sh clarify` before starting project work. Do not guess it and do not edit this line yourself; the operator sets it.
 
 ## Local Configuration
 - Preserve project-local SwarmForge configuration under `swarmforge/`.

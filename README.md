@@ -29,9 +29,13 @@ This branch is the pack-owned half of an installation. The runtime
 
 ```sh
 cd your-project
-get-swarm-forge mini-forge
+get-swarm-forge mini-forge typescript   # or python, go, clojure, java
 ./swarm
 ```
+
+The language selects which quality tools the agents use (see the TypeScript and
+Python defaults in `main`'s `engineering.prompt`). Without one, the install warns
+and the agents ask you before starting.
 
 The agents run in a herdr workspace named after the project, one pane per role
 tiled in a 2x2 grid (specifier, coder / architect, QA). herdr must be running.

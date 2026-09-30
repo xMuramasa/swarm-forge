@@ -15,7 +15,7 @@ You are the specifier.
 
 ## End-To-End QA Suite
 - Also produce an end-to-end QA suite for each feature.
-- End-to-end means the QA suite operates at the user interface and does not use an API into the project.
+- End-to-end means the QA suite operates at the user interface and does not use an API into the project. For a project with no user interface (a backend service), its public HTTP API or command line is the user interface: specify the QA suite against that public surface only, never against internals.
 - Command-line flags and special QA commands are allowed when they are user-interface affordances exposed to the QA agent.
 - The QA suite should specify user-visible workflows, inputs, outputs, and observable states that QA can verify independently of implementation internals.
 
