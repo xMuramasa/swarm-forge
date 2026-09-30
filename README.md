@@ -205,8 +205,7 @@ belong on `main` first. Pack branches own only their configuration, local
 constitution additions, role prompts, and launcher.
 
 Do not pin prompt prose with automated tests. Test observable runtime behavior
-instead. Run the tests with `bun test test/cli`. The older black-box tests are Clojure and run with
-`bb test`.
+instead. Run the tests with `bun test test/cli`.
 
 ## Runtime components and generated state
 

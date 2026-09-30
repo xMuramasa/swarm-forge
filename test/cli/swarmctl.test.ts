@@ -7,7 +7,7 @@ import {
   newTaskId, noteContent, parseMessage, readCards, reject, withApproved,
 } from "../../swarmforge/scripts/swarmctl.ts";
 
-const fakeHerdr = join(import.meta.dir, "../swarmforge/fake-herdr.sh");
+const fakeHerdr = join(import.meta.dir, "./fake-herdr.sh");
 let root: string;
 let fakeDir: string;
 let savedEnv: NodeJS.ProcessEnv;
