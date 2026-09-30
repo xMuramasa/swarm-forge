@@ -40,6 +40,21 @@ and the agents ask you before starting.
 The agents run in a herdr workspace named after the project, one pane per role
 tiled in a 2x2 grid (specifier, coder / architect, QA). herdr must be running.
 
+## Start on an integration branch
+
+The specifier works in your checkout, on the branch you have checked out, and the
+other roles' finished work is merged into it. Start each swarm from its own branch
+and review it before merging it yourself:
+
+```sh
+git switch -c swarm/<task>
+./swarm
+```
+
+The launcher refuses to start on `main`, `master` or `develop` (in a repo that
+already has commits); `SWARMFORGE_ALLOW_BRANCH=1 ./swarm` overrides it. The full
+explanation is in the Start on an integration branch section of the `main` README.
+
 ## Structure
 
 ```text
